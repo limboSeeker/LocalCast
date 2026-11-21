@@ -16,7 +16,11 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+    }
 
+    androidResources {
+        // The app ships English and Ukrainian; drop library translations into other languages.
+        localeFilters += listOf("en", "uk")
     }
 
     buildTypes {
