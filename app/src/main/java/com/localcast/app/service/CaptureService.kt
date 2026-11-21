@@ -301,8 +301,13 @@ class CaptureService : LifecycleService() {
         nm.createNotificationChannel(channel)
     }
 
+    /** Wall-clock time the broadcast went live: the notification chronometer counts from it. */
+    private var liveSinceMs = 0L
+
     private fun buildNotification(): Notification {
         val state = CastStateStore.state.value
+        val live = state.phase == CastPhase.LIVE
+        if (live && liveSinceMs == 0L) liveSinceMs = System.currentTimeMillis()
         val open = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -313,25 +318,39 @@ class CaptureService : LifecycleService() {
             Intent(this, CaptureService::class.java).setAction(CastController.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val title = if (state.phase == CastPhase.LIVE) R.string.notif_title_live else R.string.notif_title_starting
+        val title = if (live) R.string.notif_title_live else R.string.notif_title_starting
         val url = state.primaryUrl?.removeSuffix("/")
         val text = when {
             url != null -> getString(R.string.notif_text_viewers, state.viewers.size, url)
             state.port != null -> getString(R.string.notif_text_no_network)
             else -> null
         }
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_cast)
+            .setColor(getColor(R.color.notif_accent))
             .setContentTitle(getString(title))
             .setContentText(text)
             .setContentIntent(open)
-            .addAction(0, getString(R.string.notif_action_stop), stop)
+            .addAction(R.drawable.ic_stop, getString(R.string.notif_action_stop), stop)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+        if (state.pinRequired && state.pin != null) {
+            val newPin = PendingIntent.getService(
+                this, 2,
+                Intent(this, CaptureService::class.java).setAction(CastController.ACTION_REGENERATE_PIN),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(R.drawable.ic_refresh, getString(R.string.notif_action_new_pin), newPin)
+        }
+        if (live) {
+            builder.setWhen(liveSinceMs).setShowWhen(true).setUsesChronometer(true)
+        } else {
+            builder.setShowWhen(false)
+        }
+        return builder.build()
     }
 
     private fun updateNotification() {
