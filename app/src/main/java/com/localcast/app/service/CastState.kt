@@ -56,7 +56,7 @@ data class ViewerInfo(
 
 data class CastState(
     val phase: CastPhase = CastPhase.IDLE,
-    /** Ukrainian, user-facing. */
+    /** User-facing, already localized (resolved with getString in the service). */
     val error: String? = null,
     val addresses: List<NetAddress> = emptyList(),
     val port: Int? = null,

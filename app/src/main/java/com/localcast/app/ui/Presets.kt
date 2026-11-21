@@ -7,7 +7,7 @@ import com.localcast.app.settings.Priority
 import com.localcast.app.settings.ResolutionMode
 import com.localcast.app.settings.StreamSettings
 
-/** One-tap quality modes. Every preset leaves the bitrate on "Авто". */
+/** One-tap quality modes. Every preset leaves the bitrate on "Auto". */
 enum class Preset(
     val resolution: ResolutionMode,
     val fps: FpsMode,
@@ -37,7 +37,7 @@ enum class Preset(
         s.resolution == resolution && s.fps == fps && s.priority == priority && s.bitrateMbps == 0
 
     companion object {
-        /** null = "Свій": the user tuned something in "Розширені". */
+        /** null = "Custom": the user tuned something in "Advanced". */
         fun of(s: StreamSettings): Preset? = entries.firstOrNull { it.matches(s) }
     }
 }

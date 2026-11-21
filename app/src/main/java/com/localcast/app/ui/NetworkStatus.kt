@@ -61,7 +61,7 @@ private sealed interface DefaultNet {
 @Composable
 fun rememberNetworkKind(castAddresses: List<NetAddress>): NetworkKind {
     val context = LocalContext.current
-    // Seeded synchronously so the chip doesn't flash "Немає мережі" before the first callback.
+    // Seeded synchronously so the chip doesn't flash "No network" before the first callback.
     var default by remember { mutableStateOf(currentDefault(context)) }
     DisposableEffect(context) {
         val cm = context.getSystemService(ConnectivityManager::class.java)

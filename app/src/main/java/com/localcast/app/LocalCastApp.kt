@@ -9,7 +9,7 @@ class LocalCastApp : Application() {
 
     /**
      * Process-wide so the PIN and viewer tokens survive stopping/restarting the broadcast:
-     * viewers resume automatically. "Новий PIN" (regenerate) is the way to revoke access.
+     * viewers resume automatically. "New PIN" (regenerate) is the way to revoke access.
      */
     val pinGuard: PinGuard by lazy { PinGuard() }
 

@@ -40,5 +40,5 @@ val AddressTextStyle = TextStyle(fontFamily = Mono, fontWeight = FontWeight.Semi
 /** Secondary addresses, viewer IPs. */
 val AddressSmallTextStyle = TextStyle(fontFamily = Mono, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp)
 
-/** Upper-case section labels ("НАЖИВО", "PIN"). */
+/** Upper-case section labels ("LIVE", "PIN"). */
 val OverlineTextStyle = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.08.em)

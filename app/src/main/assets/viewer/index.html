@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -69,15 +69,15 @@ color:#d6e0f2;font:12px/1.5 var(--mono);white-space:pre;pointer-events:none;max-
 <form id="pinform" autocomplete="off">
 <input id="pin" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="••••••" aria-label="PIN">
 <p id="err" role="alert"></p>
-<button id="go" type="submit" disabled>Підключитися</button>
+<button id="go" type="submit" disabled data-i18n="connect">Connect</button>
 </form>
 </div>
 <div id="pill" hidden><span id="dot"></span><span id="ptxt"></span></div>
 <div id="bar">
-<button id="bi" type="button" aria-label="Статистика (S)" title="Статистика (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
-<button id="bf" type="button" aria-label="На весь екран (F)" title="На весь екран (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+<button id="bi" type="button" data-i18n-label="stats" aria-label="Stats (S)" title="Stats (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
+<button id="bf" type="button" data-i18n-label="fullscreen" aria-label="Full screen (F)" title="Full screen (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
 </div>
-<button id="playbtn" type="button" hidden>Натисніть, щоб відтворити</button>
+<button id="playbtn" type="button" hidden data-i18n="tapToPlay">Tap to play</button>
 <pre id="stats" hidden></pre>
 </div>
 <script>
@@ -99,6 +99,64 @@ var prev = null, lastStats = null, latency = null, lastFrameT = 0, lastFrames = 
 var wakeLock = null, lastClick = 0;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
+
+/* ---------- i18n ---------- */
+// Plural entries are keyed by Intl.PluralRules categories; counts here are always integers.
+var I18N = {
+  uk: {
+    connect: 'Підключитися', stats: 'Статистика (S)', fullscreen: 'На весь екран (F)', tapToPlay: 'Натисніть, щоб відтворити',
+    enterPin: 'Введіть PIN', pinHint: 'Шестизначний код на екрані телефона', wrongPin: 'Невірний PIN',
+    pinChanged: 'PIN змінено на телефоні. Введіть новий PIN', locked: 'Забагато спроб. Спробуйте через {n} с',
+    connecting: 'Підключення…', reconnecting: 'Перепідключення…', paused: 'Трансляцію призупинено',
+    stopped: 'Трансляцію зупинено на телефоні. Очікування…', notStreaming: 'Трансляцію ще не запущено. Очікування…',
+    full: 'Досягнуто ліміту глядачів', error: 'Помилка підключення. Повторюємо…',
+    na: 'н/д', ms: 'мс', mbps: 'Мбіт/с', estimate: 'оцінка', hw: 'апаратний', sw: 'програмний',
+    sLatency: 'Затримка', sFps: 'FPS', sSize: 'Розмір', sBitrate: 'Бітрейт', sCodec: 'Кодек', sEncoder: 'Енкодер',
+    sEncode: 'Кодування', sJitter: 'Джитер-буфер', sDecode: 'Декодування', sRtt: 'RTT', sDropped: 'Пропущено',
+    sLost: 'Втрачено', sPhone: 'Телефон',
+    frames: { one: 'кадр', few: 'кадри', many: 'кадрів', other: 'кадрів' },
+    packets: { one: 'пакет', few: 'пакети', many: 'пакетів', other: 'пакетів' }
+  },
+  en: {
+    connect: 'Connect', stats: 'Stats (S)', fullscreen: 'Full screen (F)', tapToPlay: 'Tap to play',
+    enterPin: 'Enter PIN', pinHint: 'The 6-digit code on the phone screen', wrongPin: 'Wrong PIN',
+    pinChanged: 'The PIN was changed on the phone. Enter the new PIN', locked: 'Too many attempts. Try again in {n} s',
+    connecting: 'Connecting…', reconnecting: 'Reconnecting…', paused: 'Casting paused',
+    stopped: 'Casting stopped on the phone. Waiting…', notStreaming: 'Casting hasn\'t started yet. Waiting…',
+    full: 'Viewer limit reached', error: 'Connection error. Retrying…',
+    na: 'n/a', ms: 'ms', mbps: 'Mbps', estimate: 'estimate', hw: 'hardware', sw: 'software',
+    sLatency: 'Latency', sFps: 'FPS', sSize: 'Resolution', sBitrate: 'Bitrate', sCodec: 'Codec', sEncoder: 'Encoder',
+    sEncode: 'Encode time', sJitter: 'Jitter buffer', sDecode: 'Decode time', sRtt: 'RTT', sDropped: 'Dropped',
+    sLost: 'Lost', sPhone: 'Phone',
+    frames: { one: 'frame', other: 'frames' },
+    packets: { one: 'packet', other: 'packets' }
+  }
+};
+// ?lang=uk|en wins; otherwise the first Ukrainian or English entry in the browser's preferred languages.
+function pickLang() {
+  var q = /[?&]lang=([a-z]{2})/i.exec(location.search);
+  if (q && I18N[q[1].toLowerCase()]) return q[1].toLowerCase();
+  var list = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
+  for (var i = 0; i < list.length; i++) {
+    var l = String(list[i]).toLowerCase();
+    if (l.indexOf('uk') === 0) return 'uk';
+    if (l.indexOf('en') === 0) return 'en';
+  }
+  return 'en';
+}
+var LANG = pickLang(), TEXT = I18N[LANG];
+var pluralRule = (function () {
+  try { var pr = new Intl.PluralRules(LANG); return function (n) { return pr.select(n); }; }
+  catch (e) { return function (n) { return n === 1 ? 'one' : 'other'; }; }
+})();
+function tr(k, n) { var v = TEXT[k] || I18N.en[k] || k; return n === undefined ? v : v.replace('{n}', n); }
+function trCount(k, n) { var f = TEXT[k]; return n + ' ' + (f[pluralRule(n)] || f.other); }
+document.documentElement.lang = LANG;
+Array.prototype.forEach.call(document.querySelectorAll('[data-i18n]'), function (el) { el.textContent = tr(el.getAttribute('data-i18n')); });
+Array.prototype.forEach.call(document.querySelectorAll('[data-i18n-label]'), function (el) {
+  var v = tr(el.getAttribute('data-i18n-label'));
+  el.setAttribute('aria-label', v); el.title = v;
+});
 
 /* ---------- UI ---------- */
 function setState(s) { state = s; stage.setAttribute('data-state', s); }
@@ -141,7 +199,7 @@ function showPin(err, sub) {
   setState(err ? 'denied' : 'pin');
   live(false);
   pinEl.value = '';
-  showCard({ title: 'Введіть PIN', sub: sub || 'Шестизначний код на екрані телефона', form: true, err: err, focus: true });
+  showCard({ title: tr('enterPin'), sub: sub || tr('pinHint'), form: true, err: err, focus: true });
 }
 
 /* ---------- start ---------- */
@@ -153,7 +211,7 @@ function start() {
 }
 function loadInfo() {
   setState('connecting');
-  showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true });
+  showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true });
   fetch('/api/info', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
     info = j;
     if (info.pinRequired && !pin && !token) showPin(); else connect();
@@ -174,7 +232,7 @@ function connect() {
   stopTimers();
   clearTimeout(watchdog);
   if (ws) dropWS();
-  if (!joined) { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true }); }
+  if (!joined) { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var w;
   try { w = new WebSocket('ws://' + location.host + '/ws'); } catch (e) { reconnect(); return; }
   ws = w;
@@ -208,7 +266,7 @@ function onMsg(data) {
     case 'sender': senderInfo = m; break;
     case 'state':
       streamInfo = m;
-      if (m.streaming === false) showPill('Трансляцію призупинено', 'var(--warn)');
+      if (m.streaming === false) showPill(tr('paused'), 'var(--warn)');
       else if (state === 'playing') pill.hidden = true;
       break;
     case 'bye':
@@ -216,10 +274,10 @@ function onMsg(data) {
       if (m.reason === 'pin_changed') {
         token = null;
         try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
-        if (info && info.pinRequired) { live(false); showPin('PIN змінено на телефоні. Введіть новий PIN'); break; }
+        if (info && info.pinRequired) { live(false); showPin(tr('pinChanged')); break; }
       }
       setState('waiting'); live(false);
-      stoppedMsg = 'Трансляцію зупинено на телефоні. Очікування…';
+      stoppedMsg = tr('stopped');
       showCard({ title: 'LocalCast', sub: stoppedMsg, spin: true });
       later(3000, connect);
       break;
@@ -233,14 +291,14 @@ function onDenied(m) {
   switch (m.reason) {
     case 'pin':
       pin = null;
-      showPin('Невірний PIN');
+      showPin(tr('wrongPin'));
       break;
     case 'locked':
       pin = null;
       var left = Math.max(1, m.retryAfterSec || 60);
       var tick = function () {
         if (left <= 0) { clearInterval(lockTimer); lockTimer = null; errEl.textContent = ''; updateGo(); return; }
-        errEl.textContent = 'Забагато спроб. Спробуйте через ' + left + ' с';
+        errEl.textContent = tr('locked', left);
         left--;
       };
       showPin();
@@ -256,17 +314,17 @@ function onDenied(m) {
       break;
     case 'full':
       setState('denied');
-      showCard({ title: 'LocalCast', sub: 'Досягнуто ліміту глядачів', spin: true });
+      showCard({ title: 'LocalCast', sub: tr('full'), spin: true });
       later(5000, connect);
       break;
     case 'not_streaming':
       setState('waiting');
-      showCard({ title: 'LocalCast', sub: 'Трансляцію ще не запущено. Очікування…', spin: true });
+      showCard({ title: 'LocalCast', sub: tr('notStreaming'), spin: true });
       later(2000, connect);
       break;
     default:
       setState('denied');
-      showCard({ title: 'LocalCast', sub: 'Помилка підключення. Повторюємо…', spin: true });
+      showCard({ title: 'LocalCast', sub: tr('error'), spin: true });
       later(3000, connect);
   }
 }
@@ -274,8 +332,8 @@ function onDenied(m) {
 /* ---------- reconnect ---------- */
 function reconnect() {
   if (timer || lockTimer) return;
-  if (joined) { setState('reconnecting'); showPill('Перепідключення…'); card.hidden = true; }
-  else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true }); }
+  if (joined) { setState('reconnecting'); showPill(tr('reconnecting')); card.hidden = true; }
+  else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var d = BACK[Math.min(attempt, BACK.length - 1)];
   attempt++;
   later(d, function () {
@@ -320,7 +378,7 @@ function newPC() {
 }
 function lost() {
   closePC();
-  if (state === 'playing') { setState('reconnecting'); showPill('Перепідключення…'); }
+  if (state === 'playing') { setState('reconnecting'); showPill(tr('reconnecting')); }
   reconnect();
 }
 function tune(r) {
@@ -388,7 +446,7 @@ function onFrames() {
   clearTimeout(watchdog);
   attempt = 0;
   hideCard(); pill.hidden = true; live(true);
-  if (streamInfo && streamInfo.streaming === false) showPill('Трансляцію призупинено');
+  if (streamInfo && streamInfo.streaming === false) showPill(tr('paused'));
   getWake();
 }
 function frameCb(now, md) {
@@ -421,13 +479,13 @@ document.addEventListener('visibilitychange', function () {
 
 /* ---------- stats ---------- */
 function num(x) { return typeof x === 'number' && isFinite(x) ? x : null; }
-function fmt(x, d, u) { return x === null || x === undefined ? 'н/д' : x.toFixed(d) + (u || ''); }
+function fmt(x, d, u) { return x === null || x === undefined ? tr('na') : x.toFixed(d) + (u || ''); }
 // Phone re-sends the picture at >= 2 fps even when the screen is static, so a longer gap means
 // the media path is dead even though ICE may still look "connected".
 var STALL_MS = 4000;
 function recoverMedia() {
   closePC();
-  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill('Перепідключення…'); send({ type: 'restart' }); arm(8000); }
+  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill(tr('reconnecting')); send({ type: 'restart' }); arm(8000); }
   else { dropWS(); reconnect(); }
 }
 function poll() {
@@ -493,23 +551,25 @@ function poll() {
   }).catch(function () {});
 }
 function renderStats(s) {
-  var res = s.width ? s.width + '×' + s.height : 'н/д';
-  var lines = [
-    'Затримка     ' + (s.latencyMs === null || s.latencyMs === undefined ? 'н/д' : (s.latencyEstimated ? '≈' : '') + s.latencyMs.toFixed(0) + ' мс' + (s.latencyEstimated ? ' (оцінка)' : '')),
-    'FPS          ' + fmt(s.fps, 1),
-    'Розмір       ' + res,
-    'Бітрейт      ' + (s.bitrateKbps === null ? 'н/д' : (s.bitrateKbps / 1000).toFixed(2) + ' Мбіт/с'),
-    'Кодек        ' + (s.codec || 'н/д'),
-    'Енкодер      ' + (senderInfo && senderInfo.encoder ? senderInfo.encoder + (senderInfo.hardware === true ? ' (апаратний)' : senderInfo.hardware === false ? ' (програмний)' : '') : 'н/д'),
-    'Кодування    ' + fmt(senderInfo ? num(senderInfo.encodeMs) : null, 1, ' мс'),
-    'Джитер-буфер ' + fmt(s.jitterBufferMs, 0, ' мс'),
-    'Декодування  ' + fmt(s.decodeMs, 1, ' мс'),
-    'RTT          ' + fmt(s.rttMs, 0, ' мс'),
-    'Пропущено    ' + (s.framesDropped === null ? 'н/д' : s.framesDropped) + ' кадрів',
-    'Втрачено     ' + (s.packetsLost === null ? 'н/д' : s.packetsLost) + ' пакетів'
+  var na = tr('na'), ms = ' ' + tr('ms');
+  var rows = [
+    [tr('sLatency'), s.latencyMs === null || s.latencyMs === undefined ? na : (s.latencyEstimated ? '≈' : '') + s.latencyMs.toFixed(0) + ms + (s.latencyEstimated ? ' (' + tr('estimate') + ')' : '')],
+    [tr('sFps'), fmt(s.fps, 1)],
+    [tr('sSize'), s.width ? s.width + '×' + s.height : na],
+    [tr('sBitrate'), s.bitrateKbps === null ? na : (s.bitrateKbps / 1000).toFixed(2) + ' ' + tr('mbps')],
+    [tr('sCodec'), s.codec || na],
+    [tr('sEncoder'), senderInfo && senderInfo.encoder ? senderInfo.encoder + (senderInfo.hardware === true ? ' (' + tr('hw') + ')' : senderInfo.hardware === false ? ' (' + tr('sw') + ')' : '') : na],
+    [tr('sEncode'), fmt(senderInfo ? num(senderInfo.encodeMs) : null, 1, ms)],
+    [tr('sJitter'), fmt(s.jitterBufferMs, 0, ms)],
+    [tr('sDecode'), fmt(s.decodeMs, 1, ms)],
+    [tr('sRtt'), fmt(s.rttMs, 0, ms)],
+    [tr('sDropped'), s.framesDropped === null ? na : trCount('frames', s.framesDropped)],
+    [tr('sLost'), s.packetsLost === null ? na : trCount('packets', s.packetsLost)]
   ];
-  if (streamInfo && streamInfo.width) lines.push('Телефон      ' + streamInfo.width + '×' + streamInfo.height + ' @' + streamInfo.fps);
-  statsEl.textContent = lines.join('\n');
+  if (streamInfo && streamInfo.width) rows.push([tr('sPhone'), streamInfo.width + '×' + streamInfo.height + ' @' + streamInfo.fps]);
+  var w = 0;
+  rows.forEach(function (r) { w = Math.max(w, r[0].length); });
+  statsEl.textContent = rows.map(function (r) { return r[0] + new Array(w - r[0].length + 2).join(' ') + r[1]; }).join('\n');
 }
 function report(s) {
   var o = {}, put = function (k, v, d) { if (v !== null && v !== undefined) o[k] = d === undefined ? v : Math.round(v * d) / d; };
@@ -545,6 +605,7 @@ biBtn.addEventListener('click', toggleStats);
 document.addEventListener('keydown', function (e) {
   if (e.target === pinEl || e.ctrlKey || e.metaKey || e.altKey) return;
   var k = e.key.toLowerCase();
+  // 'і'/'ы' and 'а' are the S and F keys on Ukrainian/Russian keyboard layouts.
   if (k === 's' || k === 'і' || k === 'ы') toggleStats();
   else if (k === 'f' || k === 'а') toggleFs();
 });

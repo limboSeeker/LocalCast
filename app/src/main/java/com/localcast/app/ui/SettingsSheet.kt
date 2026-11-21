@@ -1,5 +1,11 @@
 package com.localcast.app.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +29,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -80,7 +87,7 @@ fun SettingsSheet(onDismiss: () -> Unit) {
         scope.launch { repo.update(t) }
     }
     val preset = Preset.of(settings)
-    // A custom setup opens with "Розширені" unfolded: that is where it was made.
+    // A custom setup opens with "Advanced" unfolded: that is where it was made.
     var advanced by rememberSaveable { mutableStateOf(preset == null) }
 
     ModalBottomSheet(
@@ -157,6 +164,8 @@ fun SettingsSheet(onDismiss: () -> Unit) {
             }
 
             BatteryRow()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) LanguageRow()
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -364,7 +373,7 @@ private fun AdvancedSettings(settings: StreamSettings, change: ((StreamSettings)
 private fun bitrateLabel(mbps: Int): String =
     if (mbps == 0) stringResource(R.string.ui_set_bitrate_auto) else stringResource(R.string.ui_set_bitrate_value, mbps)
 
-/** "1080p · 60 кадр/с · 8 Мбіт/с · чіткість" for the "Свій" hint. */
+/** "1080p · 60 fps · 8 Mbps · sharpness" for the "Custom" hint. */
 @Composable
 private fun summary(s: StreamSettings): String {
     val res = stringResource(
@@ -414,6 +423,46 @@ private fun BatteryRow() {
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
             )
+        }
+    }
+}
+
+/** Per-app language is picked in system settings (Android 13+); older versions follow the system. */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun LanguageRow() {
+    val context = LocalContext.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button) { openAppLanguageSettings(context) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        LabelBlock(
+            stringResource(R.string.ui_set_language),
+            stringResource(R.string.ui_set_language_current),
+            Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private fun openAppLanguageSettings(context: Context) {
+    val app = Uri.fromParts("package", context.packageName, null)
+    try {
+        context.startActivity(Intent(Settings.ACTION_APP_LOCALE_SETTINGS, app))
+    } catch (_: Exception) {
+        // Some OEM builds lack the per-app language screen: fall back to the app's info page.
+        try {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, app))
+        } catch (_: Exception) {
         }
     }
 }

@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -36,7 +37,6 @@ import com.localcast.app.R
 import com.localcast.app.service.ViewerInfo
 import com.localcast.app.ui.theme.AddressSmallTextStyle
 import com.localcast.app.ui.theme.brand
-import java.util.Locale
 
 /** Per-viewer stream health, shown as icon + word + colour (never colour alone). */
 enum class Health { GOOD, FAIR, POOR, LOST, CONNECTING }
@@ -67,7 +67,7 @@ fun viewerHealth(v: ViewerInfo, captureFps: Int?): Health {
 @Composable
 fun ViewersCard(viewers: List<ViewerInfo>, captureFps: Int?, modifier: Modifier = Modifier) {
     BrandCard(modifier) {
-        val countCd = stringResource(R.string.ui_viewers_count_cd, viewers.size)
+        val countCd = pluralStringResource(R.plurals.ui_viewers_count_cd, viewers.size, viewers.size)
         Row(
             Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = countCd },
             verticalAlignment = Alignment.CenterVertically,
@@ -110,8 +110,6 @@ private fun browserRes(ua: String?): Int {
     }
 }
 
-private fun mbps(kbps: Double): String = String.format(Locale.US, "%.1f", kbps / 1000.0)
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ViewerRow(v: ViewerInfo, captureFps: Int?) {
@@ -148,7 +146,7 @@ private fun ViewerRow(v: ViewerInfo, captureFps: Int?) {
                 }
             }
             (vs?.fps ?: s?.fps)?.let { add { Metric(stringResource(R.string.ui_metric_fps, it.toInt().toString())) } }
-            (vs?.bitrateKbps ?: s?.bitrateKbps)?.let { add { Metric(stringResource(R.string.ui_metric_bitrate, mbps(it))) } }
+            (vs?.bitrateKbps ?: s?.bitrateKbps)?.let { add { Metric(stringResource(R.string.ui_metric_bitrate, it / 1000.0)) } }
             vs?.latencyMs?.let { add { Metric(stringResource(R.string.ui_metric_latency, it.toInt())) } }
             (vs?.rttMs ?: s?.rttMs)?.let { add { Metric(stringResource(R.string.ui_metric_rtt, it.toInt())) } }
             when (s?.qualityLimitation) {

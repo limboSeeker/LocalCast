@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core strings (service, notification, tile). UI screen strings live in strings_ui.xml. -->
+    <string name="notif_channel_name">Трансляція екрана</string>
+    <string name="notif_channel_desc">Показує, що екран зараз транслюється</string>
+    <string name="notif_title_live">Трансляція наживо</string>
+    <string name="notif_title_starting">Запуск трансляції…</string>
+    <plurals name="notif_viewers">
+        <item quantity="one">%1$d глядач · %2$s</item>
+        <item quantity="few">%1$d глядачі · %2$s</item>
+        <item quantity="many">%1$d глядачів · %2$s</item>
+        <item quantity="other">%1$d глядача · %2$s</item>
+    </plurals>
+    <string name="notif_text_no_network">Немає Wi-Fi або точки доступу</string>
+    <string name="notif_action_stop">Зупинити</string>
+    <string name="notif_action_new_pin">Новий PIN</string>
+    <string name="error_projection_denied">Дозвіл на запис екрана не надано</string>
+    <string name="error_server_start">Не вдалося запустити сервер (порти %1$d–%2$d зайняті)</string>
+    <string name="error_capture">Помилка захоплення екрана: %1$s</string>
+
+    <string name="tile_subtitle_off">Вимкнено</string>
+    <string name="tile_subtitle_starting">Запуск…</string>
+    <string name="tile_subtitle_live">Наживо</string>
+    <plurals name="tile_viewers">
+        <item quantity="one">%1$d глядач</item>
+        <item quantity="few">%1$d глядачі</item>
+        <item quantity="many">%1$d глядачів</item>
+        <item quantity="other">%1$d глядача</item>
+    </plurals>
+</resources>

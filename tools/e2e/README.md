@@ -1,9 +1,11 @@
-# LocalCast viewer e2e (без телефона)
+# LocalCast viewer e2e (no phone needed)
 
-Мок телефона (`mock-server.mjs`) віддає `app/src/main/assets/viewer/index.html`, реалізує `/api/info`, `/ws` за PROTOCOL.md
-(PIN `123456`, токени, lock після 5 помилок) і сторінку `/phone` (offerer, відео з `canvas.captureStream(60)`).
+The phone mock (`mock-server.mjs`) serves `app/src/main/assets/viewer/index.html` and implements `/api/info` and `/ws` per PROTOCOL.md
+(PIN `123456`, tokens, lockout after 5 failures), plus a `/phone` page (offerer, video from `canvas.captureStream(60)`).
 
-- Один раз: `cd tools/e2e && npm i && npx playwright install chromium`
-- Автотест: `node --test viewer.spec.mjs` (скріншоти в `out/`)
-- Вручну: `node mock-server.mjs 8099`, відкрити `http://127.0.0.1:8099/phone`, потім `http://127.0.0.1:8099/#pin=123456`
-- Керування: `POST /mock/drop` (рве WS глядача), `/mock/stop` (bye stopped), `/mock/start`, `/mock/reset`; `GET /mock/state`
+- Once: `cd tools/e2e && npm ci && npx playwright install chromium`
+- Automated: `node --test viewer.spec.mjs` (screenshots in `out/`)
+- Manual: `node mock-server.mjs 8099`, open `http://127.0.0.1:8099/phone`, then `http://127.0.0.1:8099/#pin=123456` (add `?lang=en` or `?lang=uk` before `#` to force a language)
+- Controls: `POST /mock/drop` (drops the viewer's WS), `/mock/stop` (bye stopped), `/mock/start`, `/mock/reset`; `GET /mock/state`
+
+Languages: the viewer page follows `navigator.languages` (`uk*` → Ukrainian, otherwise English). Most checks run in a `uk-UA` browser context and match Ukrainian texts; the `en-US` tests check the English PIN form, the wrong-PIN error and the stats overlay, and `?lang=` overrides.

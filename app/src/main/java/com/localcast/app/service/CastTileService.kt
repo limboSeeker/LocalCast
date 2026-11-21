@@ -84,7 +84,7 @@ class CastTileService : TileService() {
             CastPhase.LIVE -> if (state.viewers.isEmpty()) {
                 getString(R.string.tile_subtitle_live)
             } else {
-                getString(R.string.tile_subtitle_viewers, state.viewers.size)
+                resources.getQuantityString(R.plurals.tile_viewers, state.viewers.size, state.viewers.size)
             }
             CastPhase.STARTING -> getString(R.string.tile_subtitle_starting)
             else -> getString(R.string.tile_subtitle_off)

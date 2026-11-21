@@ -8,6 +8,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -200,6 +201,14 @@ class CaptureService : LifecycleService() {
         }
     }
 
+    /** The app language can change while casting (Android 13+): redraw the channel name and notification. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!started || stopping) return
+        createChannel()
+        updateNotification()
+    }
+
     override fun onDestroy() {
         // Normal path already cleaned up in stopCast(); this covers the service being torn down early.
         if (engine != null || server != null) {
@@ -361,7 +370,7 @@ class CaptureService : LifecycleService() {
         val title = if (live) R.string.notif_title_live else R.string.notif_title_starting
         val url = state.primaryUrl?.removeSuffix("/")
         val text = when {
-            url != null -> getString(R.string.notif_text_viewers, state.viewers.size, url)
+            url != null -> resources.getQuantityString(R.plurals.notif_viewers, state.viewers.size, state.viewers.size, url)
             state.port != null -> getString(R.string.notif_text_no_network)
             else -> null
         }

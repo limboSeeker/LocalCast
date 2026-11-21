@@ -1,73 +1,78 @@
 # LocalCast
 
-Трансляція екрана Android-смартфона або планшета на будь-який пристрій із браузером у локальній мережі Wi-Fi або через точку доступу телефона. Без інтернету й без хмарних серверів.
+[Українська](README.uk.md)
 
-- **Android 11+**: Samsung, Xiaomi, Google Pixel, OnePlus, MediaTek-пристрої та інші.
-- **Перегляд**: Chrome, Safari (iOS/macOS), Samsung Internet, Firefox, Edge. Нічого встановлювати не треба.
-- **Захоплення**: MediaProjection. Кадри йдуть у **апаратний енкодер H.264** без копіювання в пам'ять. Якщо апаратного H.264 немає або він не запустився, використовується програмний VP8 (до 720p/30).
-- **Передача**: WebRTC. Медіапотік зашифровано DTLS-SRTP (AES-GCM).
-- **Захист**: PIN-код (6 цифр). Після 5 невірних спроб з однієї IP — блокування на 60 с.
-- **Підключення**: за IP-адресою або QR-кодом (PIN підставляється автоматично).
-- **Перепідключення**: автоматичне — після обриву Wi-Fi, повороту екрана, а також після зупинки й повторного запуску трансляції.
+Cast the screen of an Android phone or tablet to any device with a browser, over local Wi-Fi or the phone's hotspot. No internet and no cloud servers.
 
-## Як користуватися
-1. Телефон і пристрій для перегляду мають бути в одній мережі Wi-Fi. Інший варіант: увімкнути точку доступу на телефоні й під'єднати до неї другий пристрій.
-2. У LocalCast натисніть **«Почати трансляцію»** → дозвольте запис екрана (на Android 14+ оберіть «Весь екран» або одну програму).
-3. На іншому пристрої відкрийте адресу з екрана (`http://192.168.x.x:8080`) і введіть PIN. Або просто відскануйте QR-код камерою.
-4. На сторінці перегляду: кнопка «i» або клавіша `S` показує статистику (FPS, бітрейт, кодек, енкодер, затримку). Подвійний дотик вмикає повний екран.
+- **Android 11+**: Samsung, Xiaomi, Google Pixel, OnePlus, MediaTek devices and others.
+- **Viewing**: Chrome, Safari (iOS/macOS), Samsung Internet, Firefox, Edge. Nothing to install.
+- **Capture**: MediaProjection. Frames go to the **hardware H.264 encoder** with no copies in memory. If there is no hardware H.264 encoder or it fails to start, software VP8 is used (up to 720p/30).
+- **Transport**: WebRTC. The media stream is encrypted with DTLS-SRTP (AES-GCM).
+- **Protection**: a 6-digit PIN. After 5 wrong attempts from one IP, that IP is locked out for 60 s.
+- **Connecting**: by IP address or QR code (the PIN is filled in automatically).
+- **Reconnecting**: automatic, after a Wi-Fi drop, a screen rotation, or when casting is stopped and started again.
+- **Languages**: English and Ukrainian. The app follows the system language; on Android 13+ the app language can be changed in system settings (in the app: Settings → Мова / Language). The viewer page follows the browser language; `?lang=en` or `?lang=uk` in the address picks one explicitly.
 
-**«Новий PIN»** від'єднує всіх глядачів. Підключитися знову можна лише з новим PIN.
+## How to use
+1. Put the phone and the viewing device on the same Wi-Fi network. Or turn on the hotspot on the phone and connect the other device to it.
+2. In LocalCast, tap **Start casting** and allow screen recording (on Android 14+ choose "Entire screen" or a single app).
+3. On the other device, open the address shown on the phone (`http://192.168.x.x:8080`) and enter the PIN. Or just scan the QR code with a camera.
+4. On the viewer page, the "i" button or the `S` key shows stats (FPS, bitrate, codec, encoder, latency). Double-tap toggles full screen.
 
-## Налаштування
-| Параметр | Варіанти | Примітка |
+**New PIN** disconnects all viewers. They can reconnect only with the new PIN.
+
+## Settings
+| Setting | Options | Notes |
 |---|---|---|
-| Роздільна здатність | 720p / 1080p / Нативна | Коротка сторона 720 або 1080 пікселів зі збереженням пропорцій; без збільшення |
-| Частота кадрів | Авто / 30 / 60 | «Авто» = 60, якщо екран ≥60 Гц і енкодер це підтримує |
-| Бітрейт | Авто / 2–30 Мбіт/с | «Авто» розраховується з розміру й FPS (3–20 Мбіт/с) |
-| Пріоритет | Плавність / Чіткість | Плавність тримає FPS, а за потреби трохи зменшує роздільність. Чіткість тримає роздільність |
-| Вимагати PIN | так / ні | Без PIN підключитися може будь-хто в мережі |
+| Resolution | 720p / 1080p / Native | Short side of 720 or 1080 pixels, aspect ratio kept; never upscaled |
+| Frame rate | Auto / 30 / 60 | Auto = 60 if the display runs at ≥60 Hz and the encoder supports it |
+| Bitrate | Auto / 2–30 Mbps | Auto is derived from size and FPS (3–20 Mbps) |
+| Priority | Smoothness / Sharpness | Smoothness keeps the FPS and lowers the resolution a little if needed. Sharpness keeps the resolution |
+| Require PIN | on / off | Without a PIN anyone on the network can connect |
 
-Зміни застосовуються одразу, без перезапуску трансляції.
+Changes apply immediately, without restarting the cast.
 
-## Що зроблено для низької затримки й плавності
-- **Енкодер.** Власна фабрика енкодера (`org.webrtc.TunedVideoEncoderFactory`) поверх апаратного енкодера: пріоритет реального часу, `KEY_LATENCY=1`, без B-кадрів, режим низької затримки Qualcomm. Якщо енкодер не приймає ці параметри, вони вимикаються по одному. Автоматичне зниження роздільності за якістю (quality scaler) вимкнене, тож текст не «пливе».
-- **Захоплення.** VirtualDisplay одразу в цільовому розмірі (масштабує GPU). FPS обмежується на екранах 90/120 Гц. Поворот і зміна розміру не перезапускають захоплення.
-- **Статичний екран.** Останній кадр повторюється приблизно 2 рази на секунду. Новий глядач одразу бачить картинку, а зображення дотягується до чіткого.
-- **Мережа.** Старт одразу з високим бітрейтом. Позначки DSCP дають пріоритет відео в Wi-Fi (WMM). Блокування Wi-Fi у режимі низької затримки. Інтерфейс точки доступу (ap0/swlan0) не ігнорується.
-- **Браузер.** `jitterBufferTarget = 0`, апаратне декодування в `<video>`. Перевірка «завислого» потоку: якщо кадрів немає понад 4 с, з'єднання пересоздається.
+## Low latency and smoothness
+- **Encoder.** A custom encoder factory (`org.webrtc.TunedVideoEncoderFactory`) on top of the hardware encoder: real-time priority, `KEY_LATENCY=1`, no B-frames, Qualcomm low-latency mode. If the encoder rejects these parameters, they are dropped one by one. Automatic resolution scaling by quality (the quality scaler) is off, so text doesn't blur.
+- **Capture.** The VirtualDisplay renders straight at the target size (the GPU scales). FPS is capped on 90/120 Hz displays. Rotation and size changes don't restart capture.
+- **Static screen.** The last frame is repeated about twice a second. A new viewer sees the picture at once, and it sharpens up shortly after.
+- **Network.** Starts at a high bitrate right away. DSCP marking gives video priority on Wi-Fi (WMM). A low-latency Wi-Fi lock is held. The hotspot interface (ap0/swlan0) is not ignored.
+- **Browser.** `jitterBufferTarget = 0`, hardware decoding in `<video>`. Stalled-stream check: if no frames arrive for more than 4 s, the connection is recreated.
 
-## Збирання
-Потрібні JDK 17+ і Android SDK (platform 37.2, build-tools 36). Gradle завантажить wrapper сам.
+## Building
+Requires JDK 17+ and the Android SDK (platform 37.2, build-tools 36). Gradle downloads the wrapper itself.
 ```bash
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
-Результат — окремий APK на кожну архітектуру (універсальний APK не збирається):
+The build produces one APK per architecture (no universal APK):
 
-| Release APK (`app/build/outputs/apk/release/`) | Для чого | Розмір |
+| Release APK (`app/build/outputs/apk/release/`) | For | Size |
 |---|---|---|
-| `app-arm64-v8a-release.apk` | сучасні телефони й планшети | ~8,4 МБ |
-| `app-armeabi-v7a-release.apk` | старі 32-бітні пристрої | ~6,7 МБ |
-| `app-x86_64-release.apk` | емулятор x86_64 | ~9,4 МБ |
+| `app-arm64-v8a-release.apk` | modern phones and tablets | ~8.4 MB |
+| `app-armeabi-v7a-release.apk` | older 32-bit devices | ~6.7 MB |
+| `app-x86_64-release.apk` | x86_64 emulator | ~9.4 MB |
 
-Release зібраний R8 і для перевірки підписаний debug-ключем. Debug APK (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) — без R8, ~45 МБ.
+Release is built with R8 and signed with the debug key for testing. Debug APKs (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) are built without R8, ~45 MB.
 
-Нативні бібліотеки (`.so`) лежать в APK стиснутими й розпаковуються під час встановлення. У 64-бітних APK їхні ELF-сегменти вирівняні на 16 KB (Android 15+).
+Native libraries (`.so`) are stored compressed in the APK and extracted at install time. In 64-bit APKs their ELF segments are aligned to 16 KB (Android 15+).
+
+UI strings: English in `app/src/main/res/values/` (default), Ukrainian in `values-uk/`. Lint fails the build if a string is missing in either language (`MissingTranslation`, `ExtraTranslation`). The viewer page keeps both languages in one dictionary in `app/src/main/assets/viewer/index.html`.
 
 ### CI
-GitHub Actions (`.github/workflows/android.yml`) на push у `main` і на кожен pull request:
-- `build`: `./gradlew testDebugUnitTest lintDebug assembleRelease`; артефакти — release APK arm64-v8a і armeabi-v7a та звіт lint;
-- `viewer-e2e`: тести сторінки перегляду з `tools/e2e` (мок-сервер + Playwright Chromium).
+GitHub Actions (`.github/workflows/android.yml`) runs on push to `main` and on every pull request:
+- `build`: `./gradlew testDebugUnitTest lintDebug assembleRelease`; artifacts are the arm64-v8a and armeabi-v7a release APKs and the lint report;
+- `viewer-e2e`: viewer page tests from `tools/e2e` (mock server + Playwright Chromium).
 
-## Тести
-- **Юніт-тести** (`./gradlew testDebugUnitTest`): PIN і блокування, протокол, сигналізація (Ktor test host), вибір мережевих адрес, розрахунок розміру/FPS/бітрейту.
-- **Сторінка перегляду без телефона**: `tools/e2e` (мок-сервер + Playwright). Див. `tools/e2e/README.md`.
-- **Живий пристрій або емулятор** (`adb forward tcp:8080 tcp:8080`):
-  - `node tools/e2e/device-check.mjs http://localhost:8080 <PIN> 10` — статистика й скриншот;
-  - `node tools/e2e/device-scenarios.mjs http://localhost:8080 <PIN>` — невірний PIN, перепідключення, поворот, 4 глядачі одночасно.
+## Tests
+- **Unit tests** (`./gradlew testDebugUnitTest`): PIN and lockout, protocol, signaling (Ktor test host), network address selection, size/FPS/bitrate calculation.
+- **Viewer page without a phone**: `tools/e2e` (mock server + Playwright), in Ukrainian and English browsers. See `tools/e2e/README.md`.
+- **Live device or emulator** (`adb forward tcp:8080 tcp:8080`):
+  - `node tools/e2e/device-check.mjs http://localhost:8080 <PIN> 10 [locale]`: stats and a screenshot;
+  - `node tools/e2e/device-scenarios.mjs http://localhost:8080 <PIN>`: wrong PIN, reconnect, rotation, 4 viewers at once.
 
-## Обмеження
-- **Сигналізація.** Сигналізація (PIN, SDP) іде по HTTP у локальній мережі. PIN захищає від випадкового доступу, але не від активної атаки «людина посередині» в тій самій мережі. Сам медіапотік зашифровано.
-- **Звук.** Не передається (не був потрібен).
-- **Керування.** Віддаленого керування немає. Телефоном керують лише фізично.
-- **Екран глядача.** Сторінка на `http://` не може заборонити згасання екрана (`wakeLock` працює лише на HTTPS). На ТВ і моніторах це зазвичай не має значення.
-- **Затримка.** Реальна затримка залежить від Wi-Fi: найкраще — 5 ГГц або точка доступу самого телефона. Chrome показує виміряну затримку, якщо дає час захоплення кадру. Інакше в оверлеї показується оцінка зі складових.
+## Limitations
+- **Signaling.** Signaling (PIN, SDP) goes over plain HTTP on the local network. The PIN protects against casual access, but not against an active man-in-the-middle on the same network. The media stream itself is encrypted.
+- **Audio.** Not transmitted (it wasn't needed).
+- **Control.** No remote control. The phone is operated only by hand.
+- **Viewer screen.** A page served over `http://` can't keep the screen awake (`wakeLock` works only on HTTPS). On TVs and monitors this usually doesn't matter.
+- **Latency.** Real latency depends on Wi-Fi: best is 5 GHz or the phone's own hotspot. Chrome shows measured latency when it provides the frame capture time. Otherwise the overlay shows an estimate summed from the parts of the pipeline.

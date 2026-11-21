@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_settings">Налаштування</string>
+
+    <!-- Idle -->
+    <string name="ui_device_label">Цей пристрій</string>
+    <string name="ui_start">Почати трансляцію</string>
+    <string name="ui_idle_hint">Глядачам не потрібен застосунок — лише браузер у тій самій мережі</string>
+    <string name="ui_net_wifi_5">Wi-Fi 5\u00A0ГГц</string>
+    <string name="ui_net_wifi_6">Wi-Fi 6\u00A0ГГц</string>
+    <string name="ui_net_wifi_24">Wi-Fi 2,4\u00A0ГГц — можливі ривки</string>
+    <string name="ui_net_hotspot">Точка доступу</string>
+    <string name="ui_net_other">Локальна мережа</string>
+    <string name="ui_net_none">Немає мережі</string>
+    <string name="ui_net_cd">Мережа: %1$s</string>
+    <string name="ui_net_24_hint">Для плавної картинки краще Wi-Fi 5\u00A0ГГц або точка доступу цього пристрою</string>
+    <string name="ui_preset_chip_cd">Режим якості: %1$s. Змінити</string>
+    <string name="ui_steps_title">Як підключитися</string>
+    <string name="ui_step_1">Натисніть «Почати трансляцію» і дозвольте запис екрана</string>
+    <string name="ui_step_2">На іншому пристрої відскануйте QR-код або відкрийте адресу в браузері</string>
+    <string name="ui_step_3">Введіть PIN, якщо браузер його попросить</string>
+
+    <!-- Progress / error -->
+    <string name="ui_status_stopping">Зупинка…</string>
+    <string name="ui_status_error">Трансляцію зупинено через помилку</string>
+    <string name="ui_error_unknown">Не вдалося запустити трансляцію</string>
+    <string name="ui_retry">Спробувати ще раз</string>
+
+    <!-- Live -->
+    <string name="ui_live_badge">НАЖИВО</string>
+    <string name="ui_starting_badge">ЗАПУСК</string>
+    <string name="ui_live_duration_cd">Трансляція триває %1$s</string>
+    <string name="ui_capture_info">%1$d×%2$d · %3$d\u00A0кадр/с</string>
+    <string name="ui_stop">Зупинити</string>
+    <string name="ui_connect_hint">Відкрийте на іншому пристрої в тій самій мережі</string>
+    <string name="ui_waiting_address">Отримуємо адресу…</string>
+    <string name="ui_copy">Копіювати</string>
+    <string name="ui_share">Поділитися</string>
+    <string name="ui_copied">Адресу скопійовано</string>
+    <string name="ui_share_title">Адреса трансляції</string>
+    <string name="ui_other_addresses">Інші адреси</string>
+    <string name="ui_kind_hotspot">Точка доступу</string>
+    <string name="ui_kind_other">Інше</string>
+    <string name="ui_qr_description">QR-код з адресою трансляції</string>
+    <string name="ui_qr_caption">Скануйте камерою — PIN підставиться автоматично</string>
+    <string name="ui_pin_hint">Глядач вводить його в браузері</string>
+    <string name="ui_pin_new">Новий PIN</string>
+    <string name="ui_pin_disabled">PIN вимкнено — підключитися може будь-хто в мережі</string>
+    <string name="ui_no_network">Немає мережі. Підключіться до Wi-Fi або увімкніть точку доступу на цьому пристрої</string>
+
+    <!-- Viewers -->
+    <string name="ui_viewers_title">Глядачі</string>
+    <plurals name="ui_viewers_count_cd">
+        <item quantity="one">%1$d глядач</item>
+        <item quantity="few">%1$d глядачі</item>
+        <item quantity="many">%1$d глядачів</item>
+        <item quantity="other">%1$d глядача</item>
+    </plurals>
+    <string name="ui_viewers_empty">Поки що ніхто не підключився</string>
+    <string name="ui_health_good">Добре</string>
+    <string name="ui_health_fair">Нестабільно</string>
+    <string name="ui_health_poor">Погано</string>
+    <string name="ui_health_lost">Немає зв\'язку</string>
+    <string name="ui_health_connecting">З\'єднання…</string>
+    <string name="ui_browser_other">Браузер</string>
+    <string name="ui_encoder_hardware">Апаратний енкодер</string>
+    <string name="ui_encoder_software">Програмний енкодер</string>
+    <string name="ui_metric_codec">Кодек %1$s</string>
+    <string name="ui_metric_fps">%1$s\u00A0кадр/с</string>
+    <string name="ui_metric_bitrate">%1$.1f\u00A0Мбіт/с</string>
+    <string name="ui_metric_latency">Затримка ≈ %1$d\u00A0мс</string>
+    <string name="ui_metric_rtt">RTT %1$d\u00A0мс</string>
+    <string name="ui_limit_bandwidth">Обмежує мережа</string>
+    <string name="ui_limit_cpu">Обмежує процесор</string>
+
+    <!-- Tips -->
+    <string name="ui_tips_title">Поради для плавної трансляції</string>
+    <string name="ui_tips_expand">Показати поради</string>
+    <string name="ui_tips_collapse">Сховати поради</string>
+    <string name="ui_tip_latency">Для найменшої затримки — Wi-Fi 5\u00A0ГГц або точка доступу цього пристрою</string>
+    <string name="ui_tip_battery">Вимкніть оптимізацію батареї, щоб система не зупиняла трансляцію (особливо на Xiaomi та Samsung)</string>
+    <string name="ui_tip_battery_action">Вимкнути оптимізацію батареї</string>
+
+    <!-- Settings -->
+    <string name="ui_set_quality">Якість трансляції</string>
+    <string name="ui_preset_speed">Швидкість</string>
+    <string name="ui_preset_speed_spec">720p · 60\u00A0кадр/с</string>
+    <string name="ui_preset_speed_hint">Найменша затримка — для ігор і відео</string>
+    <string name="ui_preset_balance">Баланс</string>
+    <string name="ui_preset_balance_spec">1080p · авто</string>
+    <string name="ui_preset_balance_hint">Підходить для більшості випадків</string>
+    <string name="ui_preset_quality">Якість</string>
+    <string name="ui_preset_quality_spec">Нативна · 30\u00A0кадр/с</string>
+    <string name="ui_preset_quality_hint">Найчіткіший текст — для документів і презентацій</string>
+    <string name="ui_preset_custom">Свій</string>
+    <string name="ui_preset_custom_hint">Свій режим: %1$s</string>
+    <string name="ui_set_summary_fps_auto">авто-FPS</string>
+    <string name="ui_set_summary_fps">%1$d\u00A0кадр/с</string>
+    <string name="ui_set_summary_bitrate_auto">авто-бітрейт</string>
+    <string name="ui_set_advanced">Розширені</string>
+    <string name="ui_set_advanced_cd_expand">Показати розширені налаштування</string>
+    <string name="ui_set_advanced_cd_collapse">Сховати розширені налаштування</string>
+    <string name="ui_set_resolution">Роздільна здатність</string>
+    <string name="ui_set_res_native">Нативна</string>
+    <string name="ui_set_fps">Частота кадрів</string>
+    <string name="ui_set_auto">Авто</string>
+    <string name="ui_set_fps_hint">Авто — 60\u00A0кадр/с, якщо дисплей і енкодер це підтримують, інакше 30</string>
+    <string name="ui_set_bitrate">Бітрейт</string>
+    <string name="ui_set_bitrate_auto">Авто</string>
+    <string name="ui_set_bitrate_value">%1$d\u00A0Мбіт/с</string>
+    <string name="ui_set_bitrate_hint">Авто — стеля бітрейту рахується з роздільної здатності й частоти кадрів (3–20\u00A0Мбіт/с), а WebRTC сам знижує її, коли мережа не встигає. Фіксоване значення задає стелю вручну.</string>
+    <string name="ui_set_priority">Пріоритет</string>
+    <string name="ui_set_priority_smooth">Плавність</string>
+    <string name="ui_set_priority_sharp">Чіткість</string>
+    <string name="ui_set_priority_smooth_hint">Плавність — тримати частоту кадрів, за потреби знижуючи роздільну здатність</string>
+    <string name="ui_set_priority_sharp_hint">Чіткість — тримати чіткий текст, за потреби знижуючи частоту кадрів</string>
+    <string name="ui_set_require_pin">Вимагати PIN</string>
+    <string name="ui_set_require_pin_hint">Глядач вводить шестизначний код з екрана цього пристрою</string>
+    <string name="ui_set_port">Порт</string>
+    <string name="ui_set_port_hint">Якщо зайнятий, буде взято наступний вільний</string>
+    <string name="ui_set_battery">Оптимізація батареї</string>
+    <string name="ui_set_battery_on">Увімкнена — система може зупинити трансляцію</string>
+    <string name="ui_set_battery_off">Вимкнена — трансляцію не перериватиме</string>
+    <string name="ui_set_battery_action">Вимкнути</string>
+    <string name="ui_set_language_current">Українська</string>
+    <string name="ui_set_about">Про застосунок</string>
+    <string name="ui_about_text">Трансляція екрана в браузер у локальній мережі через WebRTC. Без хмари й реєстрації.</string>
+</resources>

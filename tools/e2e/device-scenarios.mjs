@@ -9,7 +9,8 @@ const results = [];
 const check = (name, ok, extra = '') => { results.push({ name, ok, extra }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  — ' + extra : ''}`); };
 
 const browser = await chromium.launch({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--autoplay-policy=no-user-gesture-required'] });
-const ctx = () => browser.newContext({ viewport: { width: 1000, height: 700 } });
+// uk-UA: the page follows the browser language and the checks below match Ukrainian texts.
+const ctx = () => browser.newContext({ viewport: { width: 1000, height: 700 }, locale: 'uk-UA' });
 const st = (p) => p.evaluate(() => window.__localcast && window.__localcast.state);
 const stats = (p) => p.evaluate(() => window.__localcast && window.__localcast.stats);
 const waitState = (p, s, ms = 20000) => p.waitForFunction((x) => window.__localcast && window.__localcast.state === x, s, { timeout: ms }).then(() => true, () => false);

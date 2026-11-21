@@ -1,143 +1,151 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="ui_settings">Налаштування</string>
+    <string name="ui_settings">Settings</string>
 
     <!-- Idle -->
-    <string name="ui_device_label">Цей пристрій</string>
-    <string name="ui_start">Почати трансляцію</string>
-    <string name="ui_idle_hint">Глядачам не потрібен застосунок — лише браузер у тій самій мережі</string>
-    <string name="ui_net_wifi_5">Wi-Fi 5\u00A0ГГц</string>
-    <string name="ui_net_wifi_6">Wi-Fi 6\u00A0ГГц</string>
-    <string name="ui_net_wifi_24">Wi-Fi 2,4\u00A0ГГц — можливі ривки</string>
-    <string name="ui_net_wifi">Wi-Fi</string>
-    <string name="ui_net_hotspot">Точка доступу</string>
-    <string name="ui_net_ethernet">Ethernet</string>
-    <string name="ui_net_other">Локальна мережа</string>
-    <string name="ui_net_none">Немає мережі</string>
-    <string name="ui_net_cd">Мережа: %1$s</string>
-    <string name="ui_net_24_hint">Для плавної картинки краще Wi-Fi 5\u00A0ГГц або точка доступу цього пристрою</string>
-    <string name="ui_preset_chip_cd">Режим якості: %1$s. Змінити</string>
-    <string name="ui_steps_title">Як підключитися</string>
-    <string name="ui_step_1">Натисніть «Почати трансляцію» і дозвольте запис екрана</string>
-    <string name="ui_step_2">На іншому пристрої відскануйте QR-код або відкрийте адресу в браузері</string>
-    <string name="ui_step_3">Введіть PIN, якщо браузер його попросить</string>
+    <string name="ui_device_label">This device</string>
+    <string name="ui_start">Start casting</string>
+    <string name="ui_idle_hint">Viewers don\'t need an app, just a browser on the same network</string>
+    <string name="ui_net_wifi_5">Wi-Fi 5\u00A0GHz</string>
+    <string name="ui_net_wifi_6">Wi-Fi 6\u00A0GHz</string>
+    <string name="ui_net_wifi_24">Wi-Fi 2.4\u00A0GHz — may stutter</string>
+    <string name="ui_net_wifi" translatable="false">Wi-Fi</string>
+    <string name="ui_net_hotspot">Hotspot</string>
+    <string name="ui_net_ethernet" translatable="false">Ethernet</string>
+    <string name="ui_net_other">Local network</string>
+    <string name="ui_net_none">No network</string>
+    <string name="ui_net_cd">Network: %1$s</string>
+    <string name="ui_net_24_hint">For a smooth picture, use Wi-Fi 5\u00A0GHz or this device\'s hotspot</string>
+    <string name="ui_preset_chip_cd">Quality mode: %1$s. Change</string>
+    <string name="ui_steps_title">How to connect</string>
+    <string name="ui_step_1">Tap “Start casting” and allow screen recording</string>
+    <string name="ui_step_2">On another device, scan the QR code or open the address in a browser</string>
+    <string name="ui_step_3">Enter the PIN if the browser asks for it</string>
 
     <!-- Progress / error -->
-    <string name="ui_status_stopping">Зупинка…</string>
-    <string name="ui_status_error">Трансляцію зупинено через помилку</string>
-    <string name="ui_error_unknown">Не вдалося запустити трансляцію</string>
-    <string name="ui_retry">Спробувати ще раз</string>
+    <string name="ui_status_stopping">Stopping…</string>
+    <string name="ui_status_error">Casting stopped due to an error</string>
+    <string name="ui_error_unknown">Couldn\'t start casting</string>
+    <string name="ui_retry">Try again</string>
 
     <!-- Live -->
-    <string name="ui_live_badge">НАЖИВО</string>
-    <string name="ui_starting_badge">ЗАПУСК</string>
-    <string name="ui_live_duration_cd">Трансляція триває %1$s</string>
-    <string name="ui_capture_info">%1$d×%2$d · %3$d\u00A0кадр/с</string>
-    <string name="ui_stop">Зупинити</string>
-    <string name="ui_connect_hint">Відкрийте на іншому пристрої в тій самій мережі</string>
-    <string name="ui_waiting_address">Отримуємо адресу…</string>
-    <string name="ui_copy">Копіювати</string>
-    <string name="ui_share">Поділитися</string>
-    <string name="ui_copied">Адресу скопійовано</string>
-    <string name="ui_share_title">Адреса трансляції</string>
-    <string name="ui_other_addresses">Інші адреси</string>
-    <string name="ui_address_with_kind">%1$s — %2$s</string>
-    <string name="ui_kind_wifi">Wi-Fi</string>
-    <string name="ui_kind_hotspot">Точка доступу</string>
-    <string name="ui_kind_ethernet">Ethernet</string>
-    <string name="ui_kind_usb">USB</string>
-    <string name="ui_kind_vpn">VPN</string>
-    <string name="ui_kind_other">Інше</string>
-    <string name="ui_qr_description">QR-код з адресою трансляції</string>
-    <string name="ui_qr_caption">Скануйте камерою — PIN підставиться автоматично</string>
-    <string name="ui_pin_title">PIN</string>
-    <string name="ui_pin_hint">Глядач вводить його в браузері</string>
-    <string name="ui_pin_cd">PIN: %1$s</string>
-    <string name="ui_pin_new">Новий PIN</string>
-    <string name="ui_pin_disabled">PIN вимкнено — підключитися може будь-хто в мережі</string>
-    <string name="ui_no_network">Немає мережі. Підключіться до Wi-Fi або увімкніть точку доступу на цьому пристрої</string>
+    <string name="ui_live_badge">LIVE</string>
+    <string name="ui_starting_badge">STARTING</string>
+    <string name="ui_live_duration_cd">Live for %1$s</string>
+    <string name="ui_capture_info">%1$d×%2$d · %3$d\u00A0fps</string>
+    <string name="ui_stop">Stop</string>
+    <string name="ui_connect_hint">Open on another device on the same network</string>
+    <string name="ui_waiting_address">Getting the address…</string>
+    <string name="ui_copy">Copy</string>
+    <string name="ui_share">Share</string>
+    <string name="ui_copied">Address copied</string>
+    <string name="ui_share_title">Cast address</string>
+    <string name="ui_other_addresses">Other addresses</string>
+    <string name="ui_address_with_kind" translatable="false">%1$s — %2$s</string>
+    <string name="ui_kind_wifi" translatable="false">Wi-Fi</string>
+    <string name="ui_kind_hotspot">Hotspot</string>
+    <string name="ui_kind_ethernet" translatable="false">Ethernet</string>
+    <string name="ui_kind_usb" translatable="false">USB</string>
+    <string name="ui_kind_vpn" translatable="false">VPN</string>
+    <string name="ui_kind_other">Other</string>
+    <string name="ui_qr_description">QR code with the cast address</string>
+    <string name="ui_qr_caption">Scan with a camera — the PIN fills in automatically</string>
+    <string name="ui_pin_title" translatable="false">PIN</string>
+    <string name="ui_pin_hint">Viewers enter it in the browser</string>
+    <string name="ui_pin_cd" translatable="false">PIN: %1$s</string>
+    <string name="ui_pin_new">New PIN</string>
+    <string name="ui_pin_disabled">PIN is off — anyone on the network can connect</string>
+    <string name="ui_no_network">No network. Connect to Wi-Fi or turn on this device\'s hotspot</string>
 
     <!-- Viewers -->
-    <string name="ui_viewers_title">Глядачі</string>
-    <string name="ui_viewers_count_cd">Глядачів: %1$d</string>
-    <string name="ui_viewers_empty">Поки що ніхто не підключився</string>
-    <string name="ui_health_good">Добре</string>
-    <string name="ui_health_fair">Нестабільно</string>
-    <string name="ui_health_poor">Погано</string>
-    <string name="ui_health_lost">Немає зв\'язку</string>
-    <string name="ui_health_connecting">З\'єднання…</string>
-    <string name="ui_browser_chrome">Chrome</string>
-    <string name="ui_browser_safari">Safari</string>
-    <string name="ui_browser_samsung">Samsung Internet</string>
-    <string name="ui_browser_firefox">Firefox</string>
-    <string name="ui_browser_edge">Edge</string>
-    <string name="ui_browser_other">Браузер</string>
-    <string name="ui_encoder_hardware">Апаратний енкодер</string>
-    <string name="ui_encoder_software">Програмний енкодер</string>
-    <string name="ui_metric_codec">Кодек %1$s</string>
-    <string name="ui_metric_fps">%1$s\u00A0кадр/с</string>
-    <string name="ui_metric_bitrate">%1$s\u00A0Мбіт/с</string>
-    <string name="ui_metric_latency">Затримка ≈ %1$d\u00A0мс</string>
-    <string name="ui_metric_rtt">RTT %1$d\u00A0мс</string>
-    <string name="ui_limit_bandwidth">Обмежує мережа</string>
-    <string name="ui_limit_cpu">Обмежує процесор</string>
+    <string name="ui_viewers_title">Viewers</string>
+    <plurals name="ui_viewers_count_cd">
+        <item quantity="one">%1$d viewer</item>
+        <item quantity="other">%1$d viewers</item>
+    </plurals>
+    <string name="ui_viewers_empty">No one has connected yet</string>
+    <string name="ui_health_good">Good</string>
+    <string name="ui_health_fair">Unstable</string>
+    <string name="ui_health_poor">Poor</string>
+    <string name="ui_health_lost">No connection</string>
+    <string name="ui_health_connecting">Connecting…</string>
+    <string name="ui_browser_chrome" translatable="false">Chrome</string>
+    <string name="ui_browser_safari" translatable="false">Safari</string>
+    <string name="ui_browser_samsung" translatable="false">Samsung Internet</string>
+    <string name="ui_browser_firefox" translatable="false">Firefox</string>
+    <string name="ui_browser_edge" translatable="false">Edge</string>
+    <string name="ui_browser_other">Browser</string>
+    <string name="ui_encoder_hardware">Hardware encoder</string>
+    <string name="ui_encoder_software">Software encoder</string>
+    <string name="ui_metric_codec">Codec %1$s</string>
+    <string name="ui_metric_fps">%1$s\u00A0fps</string>
+    <string name="ui_metric_bitrate">%1$.1f\u00A0Mbps</string>
+    <string name="ui_metric_latency">Latency ≈ %1$d\u00A0ms</string>
+    <string name="ui_metric_rtt">RTT %1$d\u00A0ms</string>
+    <string name="ui_limit_bandwidth">Limited by network</string>
+    <string name="ui_limit_cpu">Limited by CPU</string>
 
     <!-- Tips -->
-    <string name="ui_tips_title">Поради для плавної трансляції</string>
-    <string name="ui_tips_expand">Показати поради</string>
-    <string name="ui_tips_collapse">Сховати поради</string>
-    <string name="ui_tip_latency">Для найменшої затримки — Wi-Fi 5\u00A0ГГц або точка доступу цього пристрою</string>
-    <string name="ui_tip_battery">Вимкніть оптимізацію батареї, щоб система не зупиняла трансляцію (особливо на Xiaomi та Samsung)</string>
-    <string name="ui_tip_battery_action">Вимкнути оптимізацію батареї</string>
+    <string name="ui_tips_title">Tips for smooth casting</string>
+    <string name="ui_tips_expand">Show tips</string>
+    <string name="ui_tips_collapse">Hide tips</string>
+    <string name="ui_tip_latency">For the lowest latency, use Wi-Fi 5\u00A0GHz or this device\'s hotspot</string>
+    <string name="ui_tip_battery">Turn off battery optimization so the system doesn\'t stop casting (especially on Xiaomi and Samsung)</string>
+    <string name="ui_tip_battery_action">Turn off battery optimization</string>
 
     <!-- Settings -->
-    <string name="ui_set_quality">Якість трансляції</string>
-    <string name="ui_preset_speed">Швидкість</string>
-    <string name="ui_preset_speed_spec">720p · 60\u00A0кадр/с</string>
-    <string name="ui_preset_speed_hint">Найменша затримка — для ігор і відео</string>
-    <string name="ui_preset_balance">Баланс</string>
-    <string name="ui_preset_balance_spec">1080p · авто</string>
-    <string name="ui_preset_balance_hint">Підходить для більшості випадків</string>
-    <string name="ui_preset_quality">Якість</string>
-    <string name="ui_preset_quality_spec">Нативна · 30\u00A0кадр/с</string>
-    <string name="ui_preset_quality_hint">Найчіткіший текст — для документів і презентацій</string>
-    <string name="ui_preset_custom">Свій</string>
-    <string name="ui_preset_custom_hint">Свій режим: %1$s</string>
-    <string name="ui_set_summary">%1$s · %2$s · %3$s · %4$s</string>
-    <string name="ui_set_summary_fps_auto">авто-FPS</string>
-    <string name="ui_set_summary_fps">%1$d\u00A0кадр/с</string>
-    <string name="ui_set_summary_bitrate_auto">авто-бітрейт</string>
-    <string name="ui_set_advanced">Розширені</string>
-    <string name="ui_set_advanced_cd_expand">Показати розширені налаштування</string>
-    <string name="ui_set_advanced_cd_collapse">Сховати розширені налаштування</string>
-    <string name="ui_set_resolution">Роздільна здатність</string>
-    <string name="ui_set_res_720">720p</string>
-    <string name="ui_set_res_1080">1080p</string>
-    <string name="ui_set_res_native">Нативна</string>
-    <string name="ui_set_fps">Частота кадрів</string>
-    <string name="ui_set_auto">Авто</string>
-    <string name="ui_set_fps_30">30</string>
-    <string name="ui_set_fps_60">60</string>
-    <string name="ui_set_fps_hint">Авто — 60\u00A0кадр/с, якщо дисплей і енкодер це підтримують, інакше 30</string>
-    <string name="ui_set_bitrate">Бітрейт</string>
-    <string name="ui_set_bitrate_auto">Авто</string>
-    <string name="ui_set_bitrate_value">%1$d\u00A0Мбіт/с</string>
-    <string name="ui_set_bitrate_hint">Авто — стеля бітрейту рахується з роздільної здатності й частоти кадрів (3–20\u00A0Мбіт/с), а WebRTC сам знижує її, коли мережа не встигає. Фіксоване значення задає стелю вручну.</string>
-    <string name="ui_set_priority">Пріоритет</string>
-    <string name="ui_set_priority_smooth">Плавність</string>
-    <string name="ui_set_priority_sharp">Чіткість</string>
-    <string name="ui_set_priority_smooth_hint">Плавність — тримати частоту кадрів, за потреби знижуючи роздільну здатність</string>
-    <string name="ui_set_priority_sharp_hint">Чіткість — тримати чіткий текст, за потреби знижуючи частоту кадрів</string>
-    <string name="ui_set_require_pin">Вимагати PIN</string>
-    <string name="ui_set_require_pin_hint">Глядач вводить шестизначний код з екрана цього пристрою</string>
-    <string name="ui_set_port">Порт</string>
-    <string name="ui_set_port_hint">Якщо зайнятий, буде взято наступний вільний</string>
-    <string name="ui_set_port_value">%1$d</string>
-    <string name="ui_set_battery">Оптимізація батареї</string>
-    <string name="ui_set_battery_on">Увімкнена — система може зупинити трансляцію</string>
-    <string name="ui_set_battery_off">Вимкнена — трансляцію не перериватиме</string>
-    <string name="ui_set_battery_action">Вимкнути</string>
-    <string name="ui_set_about">Про застосунок</string>
-    <string name="ui_about_version">%1$s %2$s</string>
-    <string name="ui_about_text">Трансляція екрана в браузер у локальній мережі через WebRTC. Без хмари й реєстрації.</string>
+    <string name="ui_set_quality">Cast quality</string>
+    <string name="ui_preset_speed">Speed</string>
+    <string name="ui_preset_speed_spec">720p · 60\u00A0fps</string>
+    <string name="ui_preset_speed_hint">Lowest latency — for games and video</string>
+    <string name="ui_preset_balance">Balanced</string>
+    <string name="ui_preset_balance_spec">1080p · auto</string>
+    <string name="ui_preset_balance_hint">Right for most uses</string>
+    <string name="ui_preset_quality">Quality</string>
+    <string name="ui_preset_quality_spec">Native · 30\u00A0fps</string>
+    <string name="ui_preset_quality_hint">Sharpest text — for documents and slides</string>
+    <string name="ui_preset_custom">Custom</string>
+    <string name="ui_preset_custom_hint">Custom mode: %1$s</string>
+    <string name="ui_set_summary" translatable="false">%1$s · %2$s · %3$s · %4$s</string>
+    <string name="ui_set_summary_fps_auto">auto FPS</string>
+    <string name="ui_set_summary_fps">%1$d\u00A0fps</string>
+    <string name="ui_set_summary_bitrate_auto">auto bitrate</string>
+    <string name="ui_set_advanced">Advanced</string>
+    <string name="ui_set_advanced_cd_expand">Show advanced settings</string>
+    <string name="ui_set_advanced_cd_collapse">Hide advanced settings</string>
+    <string name="ui_set_resolution">Resolution</string>
+    <string name="ui_set_res_720" translatable="false">720p</string>
+    <string name="ui_set_res_1080" translatable="false">1080p</string>
+    <string name="ui_set_res_native">Native</string>
+    <string name="ui_set_fps">Frame rate</string>
+    <string name="ui_set_auto">Auto</string>
+    <string name="ui_set_fps_30" translatable="false">30</string>
+    <string name="ui_set_fps_60" translatable="false">60</string>
+    <string name="ui_set_fps_hint">Auto — 60\u00A0fps if the display and encoder support it, otherwise 30</string>
+    <string name="ui_set_bitrate">Bitrate</string>
+    <string name="ui_set_bitrate_auto">Auto</string>
+    <string name="ui_set_bitrate_value">%1$d\u00A0Mbps</string>
+    <string name="ui_set_bitrate_hint">Auto — the bitrate cap follows resolution and frame rate (3–20\u00A0Mbps), and WebRTC lowers it when the network can\'t keep up. A fixed value sets the cap by hand.</string>
+    <string name="ui_set_priority">Priority</string>
+    <string name="ui_set_priority_smooth">Smoothness</string>
+    <string name="ui_set_priority_sharp">Sharpness</string>
+    <string name="ui_set_priority_smooth_hint">Smoothness — keep the frame rate, lowering resolution if needed</string>
+    <string name="ui_set_priority_sharp_hint">Sharpness — keep text sharp, lowering the frame rate if needed</string>
+    <string name="ui_set_require_pin">Require PIN</string>
+    <string name="ui_set_require_pin_hint">Viewers enter a 6-digit code from this device\'s screen</string>
+    <string name="ui_set_port">Port</string>
+    <string name="ui_set_port_hint">If it\'s busy, the next free one is used</string>
+    <string name="ui_set_port_value" translatable="false">%1$d</string>
+    <string name="ui_set_battery">Battery optimization</string>
+    <string name="ui_set_battery_on">On — the system may stop casting</string>
+    <string name="ui_set_battery_off">Off — casting won\'t be interrupted</string>
+    <string name="ui_set_battery_action">Turn off</string>
+    <!-- Bilingual on purpose: findable whichever language the app is in. Opens the system per-app
+         language screen (Android 13+). -->
+    <string name="ui_set_language" translatable="false">Мова / Language</string>
+    <!-- Name of the language this resource set is in. -->
+    <string name="ui_set_language_current">English</string>
+    <string name="ui_set_about">About</string>
+    <string name="ui_about_version" translatable="false">%1$s %2$s</string>
+    <string name="ui_about_text">Casts the screen to a browser on the local network over WebRTC. No cloud, no sign-up.</string>
 </resources>

@@ -1,10 +1,11 @@
 // Live check against a running LocalCast (phone or emulator via `adb forward tcp:8080 tcp:8080`).
-// usage: node device-check.mjs <baseUrl> <pin> [seconds]
-// Prints JSON stats samples and saves screenshots to out/device-*.png
+// usage: node device-check.mjs <baseUrl> <pin> [seconds] [locale]
+// Prints JSON stats samples and saves a screenshot to out/device-playing-<locale>.png.
+// locale (default uk-UA) is the browser language; the viewer page follows it.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const [, , base = 'http://localhost:8080', pin = '', secArg = '10'] = process.argv;
+const [, , base = 'http://localhost:8080', pin = '', secArg = '10', locale = 'uk-UA'] = process.argv;
 const seconds = Number(secArg);
 mkdirSync(new URL('./out/', import.meta.url), { recursive: true });
 
@@ -14,7 +15,7 @@ const browser = await chromium.launch({
     '--autoplay-policy=no-user-gesture-required',
   ],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale });
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
@@ -32,7 +33,7 @@ for (let i = 0; i < seconds; i++) {
   samples.push(await page.evaluate(() => ({ ...window.__localcast.stats, state: window.__localcast.state })));
 }
 for (const s of samples) console.log(JSON.stringify(s));
-await page.screenshot({ path: new URL('./out/device-playing.png', import.meta.url).pathname });
+await page.screenshot({ path: new URL(`./out/device-playing-${locale}.png`, import.meta.url).pathname });
 
 console.log(JSON.stringify({ event: 'summary', consoleErrors }));
 await browser.close();

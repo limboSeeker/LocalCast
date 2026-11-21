@@ -77,7 +77,7 @@ fun BrandMark(size: Dp, modifier: Modifier = Modifier) {
     }
 }
 
-/** Small upper-case label above a value ("PIN", "ЦЕЙ ПРИСТРІЙ"). */
+/** Small upper-case label above a value ("PIN", "THIS DEVICE"). */
 @Composable
 fun Overline(text: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
     Text(text.uppercase(), style = OverlineTextStyle, color = color, modifier = modifier)

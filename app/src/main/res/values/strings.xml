@@ -1,21 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Core strings (service, notification, tile). UI screen strings live in strings_ui.xml. -->
-    <string name="app_name">LocalCast</string>
-    <string name="notif_channel_name">Трансляція екрана</string>
-    <string name="notif_channel_desc">Показує, що екран зараз транслюється</string>
-    <string name="notif_title_live">Трансляція наживо</string>
-    <string name="notif_title_starting">Запуск трансляції…</string>
-    <string name="notif_text_viewers">Глядачів: %1$d · %2$s</string>
-    <string name="notif_text_no_network">Немає Wi-Fi або точки доступу</string>
-    <string name="notif_action_stop">Зупинити</string>
-    <string name="notif_action_new_pin">Новий PIN</string>
-    <string name="error_projection_denied">Дозвіл на запис екрана не надано</string>
-    <string name="error_server_start">Не вдалося запустити сервер (порти %1$d–%2$d зайняті)</string>
-    <string name="error_capture">Помилка захоплення екрана: %1$s</string>
+    <!-- Core strings (service, notification, tile). UI screen strings live in strings_ui.xml.
+         Default locale is English; Ukrainian is in values-uk/. -->
+    <string name="app_name" translatable="false">LocalCast</string>
+    <string name="notif_channel_name">Screen casting</string>
+    <string name="notif_channel_desc">Shows when the screen is being cast</string>
+    <string name="notif_title_live">Casting live</string>
+    <string name="notif_title_starting">Starting cast…</string>
+    <plurals name="notif_viewers">
+        <item quantity="one">%1$d viewer · %2$s</item>
+        <item quantity="other">%1$d viewers · %2$s</item>
+    </plurals>
+    <string name="notif_text_no_network">No Wi-Fi or hotspot</string>
+    <string name="notif_action_stop">Stop</string>
+    <string name="notif_action_new_pin">New PIN</string>
+    <string name="error_projection_denied">Screen recording wasn\'t allowed</string>
+    <string name="error_server_start">Couldn\'t start the server: no free port in %1$d–%2$d</string>
+    <string name="error_capture">Screen capture error: %1$s</string>
 
-    <string name="tile_subtitle_off">Вимкнено</string>
-    <string name="tile_subtitle_starting">Запуск…</string>
-    <string name="tile_subtitle_live">Наживо</string>
-    <string name="tile_subtitle_viewers">Глядачів: %1$d</string>
+    <string name="tile_subtitle_off">Off</string>
+    <string name="tile_subtitle_starting">Starting…</string>
+    <string name="tile_subtitle_live">Live</string>
+    <plurals name="tile_viewers">
+        <item quantity="one">%1$d viewer</item>
+        <item quantity="other">%1$d viewers</item>
+    </plurals>
 </resources>
