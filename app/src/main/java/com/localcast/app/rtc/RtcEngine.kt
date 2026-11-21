@@ -15,6 +15,7 @@ import android.view.WindowManager
 import com.localcast.app.server.ServerMessage
 import com.localcast.app.server.ViewerStats
 import com.localcast.app.service.CaptureInfo
+import com.localcast.app.service.LoadInfo
 import com.localcast.app.service.SenderStats
 import com.localcast.app.settings.Priority
 import com.localcast.app.settings.ResolutionMode
@@ -54,6 +55,12 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         fun onViewerConnection(viewerId: String, connected: Boolean)
         fun onSenderStats(viewerId: String, stats: SenderStats)
         fun onViewerReport(viewerId: String, stats: ViewerStats)
+
+        /** Every ~2 s while casting: viewers, encoders, Wi-Fi split, heat. */
+        fun onLoad(load: LoadInfo)
+
+        /** Once at start: the hardware encoder's capabilities (for "Copy diagnostics"). */
+        fun onEncoderCaps(line: String)
     }
 
     /** What every sender is configured with; recomputed whenever settings or geometry change. */
@@ -92,6 +99,15 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private var encoderProbe: EncoderCaps? = null
     private var thermal: ThermalGovernor? = null
     private var h264RetryTask: ScheduledFuture<*>? = null
+
+    /** Assumed capacity of the Wi-Fi link for all viewers together (last [rebalance]). */
+    private var linkBps = 0
+
+    /** Devices (by address) turned away because the device was at capacity, and when. */
+    private val turnedAwayAt = HashMap<String, Long>()
+
+    /** Paused: the track sends black frames, viewers show a "paused" card. */
+    private var paused = false
 
     /** Hardware sessions the device held when it last refused one, trusted for [SESSION_LIMIT_MS]. */
     private var sessionHardwareLimit: Int? = null
@@ -135,6 +151,15 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         }
     }
 
+    /** Pause: viewers get black frames (nothing private leaks) until resumed. */
+    fun setPaused(value: Boolean) = post {
+        if (paused == value || !::videoTrack.isInitialized) return@post
+        paused = value
+        videoTrack.setEnabled(!value)
+        Log.i(TAG, if (value) "paused" else "resumed")
+        if (!value) refresher?.requestFrame()
+    }
+
     fun updateSettings(newSettings: StreamSettings) = post {
         settings = newSettings
         if (isStreaming) recomputeFormat()
@@ -151,7 +176,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
             when (val tier = admission()) {
                 LoadPolicy.Tier.BUSY -> {
                     Log.w(DIAG_TAG, "$viewerId turned away: ${loadLine()}")
-                    peer.rejectBusy()
+                    turnAway(peer)
                     return@post
                 }
                 LoadPolicy.Tier.SOFTWARE, LoadPolicy.Tier.HARDWARE -> {
@@ -196,7 +221,11 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         val probe = encoders.hardwareH264Name?.let(EncoderProbe::probe)
         encoderProbe = probe
         encoderCaps = probe?.videoCaps
-        probe?.let { Log.i(DIAG_TAG, it.logLine(EncoderProbe.learnedBudget(appContext, it.codecName))) }
+        probe?.let {
+            val caps = it.logLine(EncoderProbe.learnedBudget(appContext, it.codecName))
+            Log.i(DIAG_TAG, caps)
+            listener.onEncoderCaps(caps)
+        }
 
         val adm = JavaAudioDeviceModule.builder(appContext)
             .setUseHardwareAcousticEchoCanceler(false)
@@ -345,6 +374,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private fun rebalance() {
         val lite = peers.values.count { it.softwareEncoder }
         val link = LoadPolicy.linkBudgetBps(WifiBand.currentMhz(appContext))
+        linkBps = link
         val next = LoadPolicy.shares(sendProfile.maxBitrateBps, link, peers.size - lite, lite)
         if (next != shares) {
             Log.i(DIAG_TAG, "bitrate split: ${peers.size} viewers ($lite lite), link ${link / 1_000_000} Mbps -> " +
@@ -405,6 +435,36 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 Log.w(TAG, "stats poll failed for ${peer.viewerId}", t)
             }
         }
+        try {
+            reportLoad()
+        } catch (t: Throwable) {
+            Log.w(TAG, "load report failed", t)
+        }
+    }
+
+    private fun turnAway(peer: ViewerPeer) {
+        turnedAwayAt[peer.remoteAddress] = SystemClock.elapsedRealtime()
+        peer.rejectBusy()
+        reportLoad()
+    }
+
+    private fun reportLoad() {
+        if (!isStreaming) return
+        val now = SystemClock.elapsedRealtime()
+        turnedAwayAt.values.removeAll { now - it > TURNED_AWAY_WINDOW_MS }
+        listener.onLoad(
+            LoadInfo(
+                viewers = peers.size,
+                liteViewers = peers.values.count { it.softwareEncoder },
+                turnedAway = turnedAwayAt.size,
+                linkKbps = linkBps / 1000,
+                perViewerCapKbps = shares.fullBps / 1000,
+                hardwareEncoders = TunedVideoEncoderFactory.getLiveHardwareEncoders(),
+                thermalLevel = thermal?.level?.ordinal ?: 0,
+                summary = loadLine() + " link=${linkBps / 1000}kbps cap=${shares.fullBps / 1000}kbps" +
+                    " capture=$currentSize@$currentFps",
+            ),
+        )
     }
 
     // ---- callbacks used by ViewerPeer (engine thread) ----
@@ -477,7 +537,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                     rebalance()
                 } else {
                     Log.w(DIAG_TAG, "${peer.viewerId}: hardware encoder unavailable, turned away: ${loadLine()}")
-                    peer.rejectBusy()
+                    turnAway(peer)
                 }
             }
         }
@@ -610,6 +670,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
         /** A refusal may be transient (another app held an encoder): try hardware again after this. */
         private const val SESSION_LIMIT_MS = 60_000L
+
+        /** A turned-away device counts in the "could not join" figure for this long (it retries every 10 s). */
+        private const val TURNED_AWAY_WINDOW_MS = 60_000L
 
         /**
          * libwebrtc field trials (names/params verified in the bundled m150 .so):

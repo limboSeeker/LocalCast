@@ -26,7 +26,7 @@ import java.util.Locale
  */
 internal class ViewerPeer(
     override val viewerId: String,
-    private val remoteAddress: String,
+    val remoteAddress: String,
     private val engine: RtcEngine,
     private val send: (ServerMessage) -> Unit,
 ) : ViewerSession {

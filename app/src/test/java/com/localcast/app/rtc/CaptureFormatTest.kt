@@ -101,10 +101,17 @@ class CaptureFormatTest {
 
     @Test
     fun `bitrate auto is clamped and manual is honoured`() {
-        assertEquals(3_000_000, CaptureFormat.maxBitrateBps(0, CaptureSize(720, 1280), 30))
-        assertEquals(20_000_000, CaptureFormat.maxBitrateBps(0, CaptureSize(1440, 3200), 60))
-        val mid = CaptureFormat.maxBitrateBps(0, CaptureSize(1080, 2400), 60)
-        assertTrue(mid in 10_000_000..14_000_000)
+        val p720 = CaptureFormat.maxBitrateBps(0, CaptureSize(720, 1280), 30)
+        assertTrue(p720 in 6_000_000..7_500_000)
+        val p1080 = CaptureFormat.maxBitrateBps(0, CaptureSize(1080, 1920), 30)
+        assertTrue(p1080 in 11_000_000..13_000_000)
+        // 60 fps costs more, but less than double.
+        val p1080at60 = CaptureFormat.maxBitrateBps(0, CaptureSize(1080, 1920), 60)
+        assertTrue(p1080at60 > p1080 && p1080at60 < 2 * p1080)
+        // Tablet 2560x1600 at 30 fps, and the ceiling for very large screens.
+        assertTrue(CaptureFormat.maxBitrateBps(0, CaptureSize(2560, 1600), 30) in 19_000_000..22_000_000)
+        assertEquals(30_000_000, CaptureFormat.maxBitrateBps(0, CaptureSize(1440, 3200), 60))
+        assertEquals(4_000_000, CaptureFormat.maxBitrateBps(0, CaptureSize(480, 640), 30))
         assertEquals(12_000_000, CaptureFormat.maxBitrateBps(12, CaptureSize(720, 1280), 30))
         assertTrue(CaptureFormat.startBitrateBps(10_000_000) in 5_000_000..7_000_000)
     }

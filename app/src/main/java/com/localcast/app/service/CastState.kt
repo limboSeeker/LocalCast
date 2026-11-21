@@ -25,6 +25,66 @@ data class CaptureInfo(
     val thermalLevel: Int = 0,
 )
 
+/** Why the broadcast is paused: viewers see a "paused" card and black frames meanwhile. */
+enum class PauseReason {
+    /** The user pressed Pause (app or notification). */
+    USER,
+
+    /** The screen went off or is locked ("pause on lock" setting); resumes by itself on unlock. */
+    LOCKED,
+}
+
+/** Engine-side load figures, reported every ~2 s while casting. */
+data class LoadInfo(
+    val viewers: Int,
+    /** Viewers on the reduced software VP8 stream (beyond the hardware encoders). */
+    val liteViewers: Int,
+    /** Distinct devices turned away (device at capacity) in the last minute. */
+    val turnedAway: Int,
+    /** What the Wi-Fi link is assumed to carry for all viewers together. */
+    val linkKbps: Int,
+    /** Current bitrate cap of one normal viewer (its share of the link). */
+    val perViewerCapKbps: Int,
+    val hardwareEncoders: Int,
+    /** 0 normal, 1 warm, 2 hot, 3 critical. */
+    val thermalLevel: Int,
+    /** One-line technical summary for "Copy diagnostics". */
+    val summary: String,
+)
+
+enum class HealthLevel { OK, WARN, PROBLEM }
+
+/** The most important thing to tell the user about the broadcast right now (one at a time). */
+enum class HealthIssue {
+    NONE,
+
+    /** Some devices could not join: encoders/CPU used up. */
+    AT_CAPACITY,
+
+    /** The device is hot: frame rate / resolution reduced. */
+    HOT,
+
+    /** The Wi-Fi does not keep up: quality reduced. */
+    NETWORK,
+
+    /** At least one viewer sees the picture with a noticeable delay. */
+    LATENCY,
+}
+
+/** Summary card "Broadcast health" on the live screen. */
+data class BroadcastHealth(
+    val level: HealthLevel,
+    val issue: HealthIssue,
+    val viewers: Int,
+    val liteViewers: Int,
+    val turnedAway: Int,
+    val totalKbps: Int,
+    val linkKbps: Int,
+    val worstLatencyMs: Int?,
+    val thermalLevel: Int,
+    val hardwareEncoders: Int,
+)
+
 /** Aggregated outbound stats of one viewer's PeerConnection (from getStats). */
 data class SenderStats(
     val codec: String? = null,
@@ -64,7 +124,15 @@ data class CastState(
     val pinRequired: Boolean = true,
     val viewers: List<ViewerInfo> = emptyList(),
     val capture: CaptureInfo? = null,
+    /** Non-null while paused. */
+    val pause: PauseReason? = null,
+    val health: BroadcastHealth? = null,
+    val load: LoadInfo? = null,
+    /** Hardware encoder capabilities line (EncoderProbe), for "Copy diagnostics". */
+    val encoderCaps: String? = null,
 ) {
+    val isPaused: Boolean get() = pause != null
+
     val isActive: Boolean get() = phase == CastPhase.STARTING || phase == CastPhase.LIVE
 
     /** First address the UI should show / encode in the QR code. */

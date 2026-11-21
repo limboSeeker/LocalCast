@@ -2,11 +2,15 @@ package com.localcast.app.service
 
 import android.app.Activity
 import android.app.Application
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.net.wifi.WifiManager
@@ -16,6 +20,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -57,6 +62,8 @@ class CaptureService : LifecycleService() {
     private val jobs = mutableListOf<Job>()
     private var startJob: Job? = null
     @Volatile private var pinRequired = true
+    @Volatile private var pauseOnLock = true
+    private var screenReceiverRegistered = false
     private var stopping = false
     private var started = false
 
@@ -66,6 +73,8 @@ class CaptureService : LifecycleService() {
             CastController.ACTION_START -> handleStart(intent)
             CastController.ACTION_STOP -> stopCast(error = null)
             CastController.ACTION_REGENERATE_PIN -> regeneratePin()
+            CastController.ACTION_PAUSE -> setPaused(PauseReason.USER)
+            CastController.ACTION_RESUME -> setPaused(null)
             else -> if (!started) stopSelf() // restarted without a projection token: nothing to do
         }
         return START_NOT_STICKY
@@ -100,7 +109,9 @@ class CaptureService : LifecycleService() {
             val app = application as LocalCastApp
             val settings = app.settings.current()
             pinRequired = settings.requirePin
+            pauseOnLock = settings.pauseOnLock
             acquireLocks()
+            registerScreenReceiver()
 
             val eng = RtcEngine(this@CaptureService, engineListener)
             engine = eng
@@ -137,6 +148,7 @@ class CaptureService : LifecycleService() {
         (application as LocalCastApp).settings.settings.collect { s: StreamSettings ->
             val pinTurnedOn = s.requirePin && !pinRequired
             pinRequired = s.requirePin
+            pauseOnLock = s.pauseOnLock
             if (pinTurnedOn) {
                 // Viewers admitted while the PIN was off must not keep (or regain) access.
                 pinGuard.revokeAll()
@@ -169,6 +181,62 @@ class CaptureService : LifecycleService() {
         lifecycleScope.launch { signaling?.disconnectAll("pin_changed") }
     }
 
+    /**
+     * [reason] null resumes. A pause by the user is only lifted by the user; a pause by the lock
+     * screen is lifted on unlock (and never overrides a user pause).
+     */
+    private fun setPaused(reason: PauseReason?) {
+        if (!started || stopping) return
+        val current = CastStateStore.state.value.pause
+        if (reason == current) return
+        if (reason == PauseReason.LOCKED && current == PauseReason.USER) return
+        engine?.setPaused(reason != null)
+        CastStateStore.update { it.copy(pause = reason) }
+        broadcastStreamState()
+        updateNotification()
+    }
+
+    /** Tells every viewer the stream geometry and whether it is paused. */
+    private fun broadcastStreamState() {
+        val s = CastStateStore.state.value
+        val c = s.capture ?: return
+        signaling?.broadcast(ServerMessage.State(streaming = !s.isPaused, width = c.width, height = c.height, fps = c.fps))
+    }
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+            when (intent.action) {
+                // The lock screen shows notifications: pause before the screen comes back on.
+                Intent.ACTION_SCREEN_OFF -> if (pauseOnLock) setPaused(PauseReason.LOCKED)
+                Intent.ACTION_SCREEN_ON -> if (!locked) resumeAfterLock() // no keyguard (lock "None")
+                Intent.ACTION_USER_PRESENT -> resumeAfterLock()
+            }
+        }
+    }
+
+    private fun resumeAfterLock() {
+        if (CastStateStore.state.value.pause == PauseReason.LOCKED) setPaused(null)
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        // System broadcasts still arrive with NOT_EXPORTED.
+        ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        screenReceiverRegistered = true
+    }
+
+    private fun unregisterScreenReceiver() {
+        if (!screenReceiverRegistered) return
+        runCatching { unregisterReceiver(screenReceiver) }
+        screenReceiverRegistered = false
+    }
+
     private fun stopCast(error: String?) {
         if (stopping) return
         stopping = true
@@ -193,6 +261,7 @@ class CaptureService : LifecycleService() {
             engine = null
             signaling = null
             releaseLocks()
+            unregisterScreenReceiver()
             CastStateStore.update {
                 CastState(phase = if (error != null) CastPhase.ERROR else CastPhase.IDLE, error = error)
             }
@@ -217,6 +286,7 @@ class CaptureService : LifecycleService() {
             CastStateStore.update { CastState() }
         }
         releaseLocks() // idempotent; also drops the activity callbacks that reference this service
+        unregisterScreenReceiver()
         super.onDestroy()
     }
 
@@ -231,7 +301,7 @@ class CaptureService : LifecycleService() {
                     it
                 }
             }
-            signaling?.broadcast(ServerMessage.State(streaming = true, width = info.width, height = info.height, fps = info.fps))
+            broadcastStreamState()
             lifecycleScope.launch { updateNotification() }
         }
 
@@ -250,6 +320,16 @@ class CaptureService : LifecycleService() {
         override fun onViewerReport(viewerId: String, stats: ViewerStats) = updateViewer(viewerId) {
             it.copy(viewer = stats)
         }
+
+        override fun onLoad(load: LoadInfo) {
+            CastStateStore.update { it.copy(load = load, health = HealthPolicy.evaluate(load, it.viewers)) }
+            Diagnostics.remember(this@CaptureService, load = load.summary)
+        }
+
+        override fun onEncoderCaps(line: String) {
+            CastStateStore.update { it.copy(encoderCaps = line) }
+            Diagnostics.remember(this@CaptureService, encoderCaps = line)
+        }
     }
 
     private val signalingListener = object : Signaling.Listener {
@@ -258,6 +338,8 @@ class CaptureService : LifecycleService() {
                 s.copy(viewers = s.viewers.filterNot { it.id == viewerId } +
                     ViewerInfo(id = viewerId, remoteAddress = remoteIp, userAgent = userAgent, connected = false))
             }
+            // A viewer joining during a pause must show the "paused" card, not a black picture.
+            if (CastStateStore.state.value.isPaused) broadcastStreamState()
             lifecycleScope.launch { updateNotification() }
         }
 
@@ -367,7 +449,11 @@ class CaptureService : LifecycleService() {
             Intent(this, CaptureService::class.java).setAction(CastController.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val title = if (live) R.string.notif_title_live else R.string.notif_title_starting
+        val title = when {
+            live && state.isPaused -> R.string.notif_title_paused
+            live -> R.string.notif_title_live
+            else -> R.string.notif_title_starting
+        }
         val url = state.primaryUrl?.removeSuffix("/")
         val text = when {
             url != null -> resources.getQuantityString(R.plurals.notif_viewers, state.viewers.size, state.viewers.size, url)
@@ -386,6 +472,20 @@ class CaptureService : LifecycleService() {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        if (live) {
+            val resume = state.isPaused
+            val toggle = PendingIntent.getService(
+                this, 3,
+                Intent(this, CaptureService::class.java)
+                    .setAction(if (resume) CastController.ACTION_RESUME else CastController.ACTION_PAUSE),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(
+                if (resume) R.drawable.ic_play else R.drawable.ic_pause,
+                getString(if (resume) R.string.notif_action_resume else R.string.notif_action_pause),
+                toggle,
+            )
+        }
         if (state.pinRequired && state.pin != null) {
             val newPin = PendingIntent.getService(
                 this, 2,

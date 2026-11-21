@@ -30,9 +30,12 @@ data class StreamSettings(
     val fps: FpsMode = FpsMode.AUTO,
     /** 0 = automatic, otherwise Mbit/s (2..30). */
     val bitrateMbps: Int = 0,
-    val priority: Priority = Priority.SMOOTH,
+    /** Sharp by default: slides, documents and app screens matter more than motion. */
+    val priority: Priority = Priority.SHARP,
     val requirePin: Boolean = true,
     val port: Int = DEFAULT_PORT,
+    /** Pause the broadcast while the screen is off or locked (the lock screen shows notifications). */
+    val pauseOnLock: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_PORT = 8080
@@ -50,6 +53,7 @@ class SettingsRepository(private val context: Context) {
         val priority = stringPreferencesKey("priority")
         val requirePin = booleanPreferencesKey("require_pin")
         val port = intPreferencesKey("port")
+        val pauseOnLock = booleanPreferencesKey("pause_on_lock")
     }
 
     val settings: Flow<StreamSettings> = context.dataStore.data
@@ -62,6 +66,7 @@ class SettingsRepository(private val context: Context) {
                 priority = p[Keys.priority].toEnum(d.priority),
                 requirePin = p[Keys.requirePin] ?: d.requirePin,
                 port = (p[Keys.port] ?: d.port).coerceIn(1024, 65535),
+                pauseOnLock = p[Keys.pauseOnLock] ?: d.pauseOnLock,
             )
         }
         .distinctUntilChanged()
@@ -78,6 +83,7 @@ class SettingsRepository(private val context: Context) {
                 priority = p[Keys.priority].toEnum(d.priority),
                 requirePin = p[Keys.requirePin] ?: d.requirePin,
                 port = p[Keys.port] ?: d.port,
+                pauseOnLock = p[Keys.pauseOnLock] ?: d.pauseOnLock,
             )
             val new = transform(old)
             p[Keys.resolution] = new.resolution.name
@@ -86,6 +92,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.priority] = new.priority.name
             p[Keys.requirePin] = new.requirePin
             p[Keys.port] = new.port.coerceIn(1024, 65535)
+            p[Keys.pauseOnLock] = new.pauseOnLock
         }
     }
 

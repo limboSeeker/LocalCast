@@ -21,7 +21,7 @@ enum class Preset(
         R.string.ui_preset_speed, R.string.ui_preset_speed_spec, R.string.ui_preset_speed_hint,
     ),
     BALANCE(
-        ResolutionMode.P1080, FpsMode.AUTO, Priority.SMOOTH,
+        ResolutionMode.P1080, FpsMode.AUTO, Priority.SHARP,
         R.string.ui_preset_balance, R.string.ui_preset_balance_spec, R.string.ui_preset_balance_hint,
     ),
     QUALITY(

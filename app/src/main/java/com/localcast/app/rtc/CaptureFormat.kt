@@ -14,11 +14,13 @@ data class CaptureSize(val width: Int, val height: Int) {
 /** Pure sizing / rate rules (unit-tested). Android capability checks are passed in as lambdas. */
 object CaptureFormat {
     const val MIN_BITRATE_BPS = 300_000
-    private const val AUTO_MIN_BPS = 3_000_000
-    private const val AUTO_MAX_BPS = 20_000_000
+    private const val AUTO_MIN_BPS = 4_000_000
+    private const val AUTO_MAX_BPS = 30_000_000
 
-    /** Bits per pixel per frame for screen content with H.264 (sharp text at moderate bitrate). */
-    private const val AUTO_BPP = 0.08
+    /** "Auto" at the reference size: enough for sharp text on slides and documents. */
+    private const val AUTO_REF_BPS = 8_000_000.0
+    private const val AUTO_REF_PIXELS = 1_150_000.0
+    private const val AUTO_60FPS_FACTOR = 1.4
 
     /**
      * Capture size for a display of [displayWidth]x[displayHeight] in its current orientation.
@@ -107,8 +109,11 @@ object CaptureFormat {
     /** Max bitrate: user choice in Mbit/s, or automatic from pixel rate when [userMbps] == 0. */
     fun maxBitrateBps(userMbps: Int, size: CaptureSize, fps: Int): Int {
         if (userMbps > 0) return userMbps * 1_000_000
-        val auto = size.pixels * fps * AUTO_BPP
-        return auto.roundToInt().coerceIn(AUTO_MIN_BPS, AUTO_MAX_BPS)
+        // Screen content needs bits for edges (text) more than for area: grow sub-linearly with
+        // the pixel count, and less than 2× for 60 fps (consecutive frames are similar).
+        val area = Math.pow(size.pixels / AUTO_REF_PIXELS, 0.75)
+        val rate = if (fps > 30) AUTO_60FPS_FACTOR else 1.0
+        return (AUTO_REF_BPS * area * rate).roundToInt().coerceIn(AUTO_MIN_BPS, AUTO_MAX_BPS)
     }
 
     /** Start bitrate: high enough that the first frames are already sharp on a LAN. */
