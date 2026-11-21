@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Point
 import android.hardware.display.DisplayManager
 import android.media.MediaCodecInfo
-import android.media.MediaCodecList
 import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +16,7 @@ import com.localcast.app.server.ViewerStats
 import com.localcast.app.service.CaptureInfo
 import com.localcast.app.service.SenderStats
 import com.localcast.app.settings.Priority
+import com.localcast.app.settings.ResolutionMode
 import com.localcast.app.settings.StreamSettings
 import org.webrtc.CryptoOptions
 import org.webrtc.EglBase
@@ -81,6 +81,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private var eglBase: EglBase? = null
     private var encoderFactory: TunedVideoEncoderFactory? = null
     private var encoderCaps: MediaCodecInfo.VideoCapabilities? = null
+    private var encoderProbe: EncoderCaps? = null
+    private var thermal: ThermalGovernor? = null
+    private var h264RetryTask: ScheduledFuture<*>? = null
     private var helper: SurfaceTextureHelper? = null
     private var capturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
@@ -133,6 +136,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 peer.closeNow()
                 return@post
             }
+            peer.softwareEncoder = hardwareSessionsExhausted()
+            if (peer.softwareEncoder) Log.i(TAG, "$viewerId: hardware encoder budget used up — starting on VP8")
             peers[viewerId] = peer
             peer.negotiate()
         }
@@ -162,8 +167,12 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         ensureWebRtcInitialized(appContext)
 
         val egl = EglBase.create().also { eglBase = it }
-        val encoders = TunedVideoEncoderFactory(egl.eglBaseContext, encoderListener).also { encoderFactory = it }
-        encoderCaps = encoders.hardwareH264Name?.let(::videoCapabilitiesOf)
+        val guard = DebugKnobs.int("guard", 1) != 0
+        val encoders = TunedVideoEncoderFactory(egl.eglBaseContext, encoderListener, guard).also { encoderFactory = it }
+        val probe = encoders.hardwareH264Name?.let(EncoderProbe::probe)
+        encoderProbe = probe
+        encoderCaps = probe?.videoCaps
+        probe?.let { Log.i(DIAG_TAG, it.logLine(EncoderProbe.learnedBudget(appContext, it.codecName))) }
 
         val adm = JavaAudioDeviceModule.builder(appContext)
             .setUseHardwareAcousticEchoCanceler(false)
@@ -186,7 +195,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         val textureHelper = SurfaceTextureHelper.create("LocalCast-Capture", egl.eglBaseContext, true, YuvConverter())
             ?: error("SurfaceTextureHelper.create failed")
         helper = textureHelper
-        val frames = FrameRefresher(source.capturerObserver, textureHelper).also { refresher = it }
+        val idleMs = DebugKnobs.int("idle_ms", FrameRefresher.DEFAULT_IDLE_REFRESH_MS.toInt()).toLong()
+        val frames = FrameRefresher(source.capturerObserver, textureHelper, idleMs).also { refresher = it }
+        thermal = ThermalGovernor(appContext) { post { if (isStreaming) recomputeFormat() } }
 
         val screen = ScreenCapturerAndroid(projectionData, projectionCallback)
         capturer = screen
@@ -201,11 +212,15 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         videoTrack = factory.createVideoTrack("screen", source)
         frames.start()
         isStreaming = true
+        thermal?.start()
         registerDisplayListener()
         statsTask = executor.scheduleWithFixedDelay({ pollStats() }, 2, 2, TimeUnit.SECONDS)
         Log.i(TAG, "capture started $size@$fps, encoder=${encoders.hardwareH264Name ?: "software VP8"}")
-        listener.onCaptureInfo(CaptureInfo(size.width, size.height, fps))
+        listener.onCaptureInfo(captureInfo(size, fps))
     }
+
+    private fun captureInfo(size: CaptureSize, fps: Int) =
+        CaptureInfo(size.width, size.height, fps, thermalLevel = thermal?.level?.ordinal ?: 0)
 
     private fun computeFormat(): Pair<CaptureSize, Int> {
         val (displaySize, refreshHz) = displayInfo()
@@ -213,20 +228,41 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         val encoders = encoderFactory
         val hardware = encoders?.isH264Offered == true
         val caps = if (hardware) encoderCaps else null
-        val result = CaptureFormat.choose(
+        val heat = thermal?.level ?: ThermalGovernor.Level.NORMAL
+        val resolution = if (heat >= ThermalGovernor.Level.HOT && settings.resolution != ResolutionMode.P720) {
+            ResolutionMode.P720
+        } else {
+            settings.resolution
+        }
+        val probe = encoderProbe
+        val align = if (hardware && probe != null) {
+            CaptureFormat.Alignment(probe.widthAlignment, probe.heightAlignment)
+        } else {
+            CaptureFormat.Alignment.EVEN
+        }
+        val (size, chosenFps) = CaptureFormat.choose(
             display = display,
-            resolution = settings.resolution,
+            resolution = resolution,
             fpsMode = settings.fps,
             preferSmooth = settings.priority == Priority.SMOOTH,
             displayRefreshHz = refreshHz,
             hardwareEncoder = hardware,
+            align = align,
         ) { w, h, fps ->
             caps == null || runCatching {
                 if (fps <= 30) caps.isSizeSupported(w, h) else caps.areSizeAndRateSupported(w, h, fps.toDouble())
             }.getOrDefault(false)
         }
-        val (size, fps) = result
-        val maxBps = CaptureFormat.maxBitrateBps(settings.bitrateMbps, size, fps)
+        val fps = when {
+            heat >= ThermalGovernor.Level.CRITICAL -> minOf(chosenFps, 15)
+            heat >= ThermalGovernor.Level.WARM -> minOf(chosenFps, 30)
+            else -> chosenFps
+        }
+        var maxBps = CaptureFormat.maxBitrateBps(settings.bitrateMbps, size, fps)
+        // Never ask the hardware encoder for more than it declares it can do.
+        if (hardware) probe?.bitrateRange?.let { maxBps = minOf(maxBps, (it.last * 0.9).toInt()) }
+        if (heat >= ThermalGovernor.Level.HOT) maxBps = (maxBps * 0.7).toInt()
+        maxBps = maxOf(maxBps, CaptureFormat.MIN_BITRATE_BPS)
         sendProfile = SendProfile(
             maxBitrateBps = maxBps,
             startBitrateBps = CaptureFormat.startBitrateBps(maxBps),
@@ -237,7 +273,21 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             },
         )
-        return result
+        return size to fps
+    }
+
+    /**
+     * True when a new viewer should start on software VP8 because the device's concurrent hardware
+     * H.264 sessions are used up. Only a limit the device itself demonstrated counts (vendor
+     * performance points are a minimum guarantee, not a ceiling); without one we keep trying
+     * hardware and a repeated failure teaches the limit. Compared with the encoders actually running
+     * plus hardware viewers that are still connecting (their encoder starts after negotiation).
+     */
+    private fun hardwareSessionsExhausted(): Boolean {
+        if (encoderFactory?.isH264Offered != true) return false
+        val budget = EncoderProbe.learnedBudget(appContext, encoderProbe?.codecName) ?: return false
+        val starting = peers.values.count { !it.softwareEncoder && !it.isConnected }
+        return TunedVideoEncoderFactory.getLiveHardwareEncoders() + starting >= budget
     }
 
     private fun recomputeFormat() {
@@ -248,9 +298,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
             currentFps = fps
             capturer?.changeCaptureFormat(size.width, size.height, fps)
             videoSource?.adaptOutputFormat(size.width, size.height, fps)
-            listener.onCaptureInfo(CaptureInfo(size.width, size.height, fps))
             refresher?.requestFrame()
         }
+        listener.onCaptureInfo(captureInfo(size, fps)) // also carries the thermal level
         peers.values.forEach { it.applySendParameters() }
     }
 
@@ -259,6 +309,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         released = true
         isStreaming = false
         statsTask?.cancel(false)
+        h264RetryTask?.cancel(false)
+        thermal?.stop()
+        thermal = null
         unregisterDisplayListener()
         peers.values.toList().forEach { it.closeNow() }
         peers.clear()
@@ -310,13 +363,16 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 .createCryptoOptions()
         }
 
-    /** H.264 first (when the hardware encoder is usable), VP8 fallback, plus RTX for retransmissions. */
-    internal fun applyCodecPreferences(transceiver: RtpTransceiver) {
+    /**
+     * H.264 first (when the hardware encoder is usable), VP8 fallback, plus RTX for retransmissions.
+     * [preferSoftware]: VP8 first for a viewer beyond the hardware session budget.
+     */
+    internal fun applyCodecPreferences(transceiver: RtpTransceiver, preferSoftware: Boolean) {
         val codecs = factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs
         val h264 = if (encoderFactory?.isH264Offered == true) codecs.filter { it.name.equals("H264", true) } else emptyList()
         val vp8 = codecs.filter { it.name.equals("VP8", true) }
         val rtx = codecs.filter { it.name.equals("rtx", true) }
-        val ordered = h264 + vp8 + rtx
+        val ordered = (if (preferSoftware) vp8 + h264 else h264 + vp8) + rtx
         if (ordered.isEmpty()) return
         val result = transceiver.setCodecPreferences(ordered)
         Log.d(TAG, "codec preferences ${ordered.map { it.name }}: $result")
@@ -411,30 +467,34 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
         override fun onEncoderFailed(codecName: String, reason: String, otherEncodersActive: Boolean) {
             if (otherEncodersActive) {
-                // Probably the device's limit of concurrent hardware encoders: this viewer falls back
-                // to VP8 by itself (libwebrtc encoder switch), everybody else keeps H.264.
+                // The device's limit of concurrent hardware encoders: this viewer falls back to VP8 by
+                // itself (libwebrtc encoder switch), everybody else keeps H.264, and later viewers
+                // beyond this number start on VP8 right away (remembered per device).
                 Log.w(TAG, "hardware encoder $codecName failed with others running ($reason) — keeping H.264")
+                EncoderProbe.learnBudget(appContext, codecName, TunedVideoEncoderFactory.getLiveHardwareEncoders())
                 return
             }
-            Log.e(TAG, "hardware encoder $codecName failed: $reason — switching new sessions to VP8")
+            Log.e(TAG, "hardware encoder $codecName failed: $reason — VP8 for new sessions, retry in ${H264_RETRY_S}s")
             // libwebrtc switches the running session to the next negotiated codec (VP8) by itself;
-            // stop offering H.264 so later viewers start directly on the working path.
+            // stop offering H.264 for a while so later viewers start directly on the working path.
             post {
                 encoderFactory?.setH264Disabled(true)
                 if (isStreaming) recomputeFormat()
+                h264RetryTask?.cancel(false)
+                h264RetryTask = executor.schedule({
+                    if (released) return@schedule
+                    Log.i(TAG, "offering hardware H.264 to new viewers again")
+                    encoderFactory?.setH264Disabled(false)
+                    if (isStreaming) recomputeFormat()
+                }, H264_RETRY_S, TimeUnit.SECONDS)
             }
         }
     }
 
-    private fun videoCapabilitiesOf(codecName: String): MediaCodecInfo.VideoCapabilities? = runCatching {
-        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
-            .firstOrNull { it.name == codecName }
-            ?.getCapabilitiesForType("video/avc")
-            ?.videoCapabilities
-    }.getOrNull()
-
     companion object {
         private const val TAG = "LocalCast/Engine"
+        private const val DIAG_TAG = "LocalCast/Diag"
+        private const val H264_RETRY_S = 30L
 
         /**
          * libwebrtc field trials (names/params verified in the bundled m150 .so):

@@ -67,9 +67,9 @@ class CaptureFormatTest {
 
     @Test
     fun `auto stays at 30 on a 50 Hz display and when 30 is forced`() {
-        val a = CaptureFormat.choose(CaptureSize(1080, 2400), ResolutionMode.P1080, FpsMode.AUTO, true, 50f, true, always)
+        val a = CaptureFormat.choose(CaptureSize(1080, 2400), ResolutionMode.P1080, FpsMode.AUTO, true, 50f, true, isSupported = always)
         assertEquals(30, a.second)
-        val b = CaptureFormat.choose(CaptureSize(1080, 2400), ResolutionMode.P1080, FpsMode.FPS_30, true, 120f, true, always)
+        val b = CaptureFormat.choose(CaptureSize(1080, 2400), ResolutionMode.P1080, FpsMode.FPS_30, true, 120f, true, isSupported = always)
         assertEquals(30, b.second)
     }
 
@@ -107,5 +107,21 @@ class CaptureFormatTest {
         assertTrue(mid in 10_000_000..14_000_000)
         assertEquals(12_000_000, CaptureFormat.maxBitrateBps(12, CaptureSize(720, 1280), 30))
         assertTrue(CaptureFormat.startBitrateBps(10_000_000) in 5_000_000..7_000_000)
+    }
+
+    @Test
+    fun `16-pixel encoder alignment rounds down and never exceeds the content`() {
+        val a16 = CaptureFormat.Alignment(16, 16)
+        val size = CaptureFormat.targetSize(1440, 3120, ResolutionMode.P1080, a16)
+        assertEquals(CaptureSize(1072, 2336), size)
+        val native = CaptureFormat.targetSize(1080, 2340, ResolutionMode.NATIVE, a16)
+        assertEquals(CaptureSize(1072, 2336), native)
+        // landscape: width is the long side
+        assertEquals(CaptureSize(2336, 1072), CaptureFormat.targetSize(2340, 1080, ResolutionMode.NATIVE, a16))
+    }
+
+    @Test
+    fun `default alignment keeps the even sizes`() {
+        assertEquals(CaptureSize(1080, 2340), CaptureFormat.targetSize(1440, 3120, ResolutionMode.P1080))
     }
 }

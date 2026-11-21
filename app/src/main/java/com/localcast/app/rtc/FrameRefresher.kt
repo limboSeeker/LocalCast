@@ -10,13 +10,17 @@ import org.webrtc.VideoFrame
  *
  * A VirtualDisplay produces frames only when the screen changes. On a static screen a newly
  * connected viewer would therefore see nothing, and the last encoded frame would never be refined.
- * While idle we re-deliver the last texture with [SurfaceTextureHelper.forceFrame]. Repeated frames
- * carry the same SurfaceTexture timestamp, which libwebrtc would drop ("same/old timestamp"), so they
- * are re-stamped with the current RTC time here.
+ * While idle we re-deliver the last texture with [SurfaceTextureHelper.forceFrame] every
+ * [idleRefreshMs] (10 fps by default): a steady input cadence keeps the encoder's rate control and
+ * both Wi-Fi radios out of their "idle" states, so the first frames of motion are not delayed.
+ * Repeated frames carry the same SurfaceTexture timestamp, which libwebrtc would drop
+ * ("same/old timestamp"), so they are re-stamped with the current RTC time here. Output timestamps
+ * are at least [MIN_STEP_NS] apart (closer frames are dropped by the encoder pipeline).
  */
 class FrameRefresher(
     private val downstream: CapturerObserver,
     private val helper: SurfaceTextureHelper,
+    private val idleRefreshMs: Long = DEFAULT_IDLE_REFRESH_MS,
 ) : CapturerObserver {
 
     // All fields below are touched only on the SurfaceTextureHelper thread.
@@ -31,7 +35,7 @@ class FrameRefresher(
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
-            if (lastFrameAtMs != 0L && SystemClock.elapsedRealtime() - lastFrameAtMs >= IDLE_REFRESH_MS) {
+            if (lastFrameAtMs != 0L && SystemClock.elapsedRealtime() - lastFrameAtMs >= idleRefreshMs) {
                 helper.forceFrame()
             }
             helper.handler.postDelayed(this, TICK_MS)
@@ -68,7 +72,7 @@ class FrameRefresher(
         val output = if (isRepeat) {
             maxOf(System.nanoTime(), lastOutputTimestampNs + MIN_STEP_NS) // rtc::TimeNanos() clock
         } else {
-            maxOf(source, lastOutputTimestampNs + 1)
+            maxOf(source, lastOutputTimestampNs + MIN_STEP_NS)
         }
         if (!isRepeat) lastSourceTimestampNs = source
         lastOutputTimestampNs = output
@@ -84,10 +88,10 @@ class FrameRefresher(
         }
     }
 
-    private companion object {
-        const val TICK_MS = 250L
-        /** Re-send the last frame when the screen has been static this long (≈2 fps refresh). */
-        const val IDLE_REFRESH_MS = 500L
-        const val MIN_STEP_NS = 1_000_000L
+    companion object {
+        /** Re-send the last frame when the screen has been static this long (10 fps refresh). */
+        const val DEFAULT_IDLE_REFRESH_MS = 100L
+        private const val TICK_MS = 20L
+        private const val MIN_STEP_NS = 2_000_000L
     }
 }

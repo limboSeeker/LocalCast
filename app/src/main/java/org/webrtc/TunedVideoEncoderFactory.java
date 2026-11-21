@@ -5,6 +5,7 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaCrypto;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Surface;
 import androidx.annotation.Nullable;
@@ -51,16 +52,28 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   private final SoftwareVideoEncoderFactory software = new SoftwareVideoEncoderFactory();
   @Nullable private final MediaCodecInfo h264Codec;
   @Nullable private final Listener listener;
+  private final boolean guardEnabled;
   private volatile boolean h264Disabled;
-  /** Hardware encoder instances currently initialised (one per connected viewer). */
+  /** Hardware encoder instances currently initialised or initialising (one per connected viewer). */
   private static final AtomicInteger liveHardwareEncoders = new AtomicInteger();
+  private static final AtomicInteger encoderSerial = new AtomicInteger();
 
   public TunedVideoEncoderFactory(EglBase.Context sharedContext, @Nullable Listener listener) {
+    this(sharedContext, listener, /* guardEnabled= */ true);
+  }
+
+  /**
+   * @param guardEnabled use {@link GuardBitrateAdjuster}'s overshoot guard (on by default; the switch
+   *     exists for A/B measurements).
+   */
+  public TunedVideoEncoderFactory(
+      EglBase.Context sharedContext, @Nullable Listener listener, boolean guardEnabled) {
     if (!(sharedContext instanceof EglBase14.Context)) {
       throw new IllegalArgumentException("EGL14 context required");
     }
     this.sharedContext = (EglBase14.Context) sharedContext;
     this.listener = listener;
+    this.guardEnabled = guardEnabled;
     this.h264Codec = findHardwareH264Encoder();
     android.util.Log.i(TAG, "Hardware H.264 encoder: " + (h264Codec == null ? "none" : h264Codec.getName()));
   }
@@ -78,6 +91,11 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
 
   public boolean isH264Offered() {
     return h264Codec != null && !h264Disabled;
+  }
+
+  /** Hardware H.264 encoder instances that are running or initialising right now. */
+  public static int getLiveHardwareEncoders() {
+    return liveHardwareEncoders.get();
   }
 
   @Override
@@ -114,9 +132,10 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
           MediaCodecUtils.selectColorFormat(MediaCodecUtils.TEXTURE_COLOR_FORMATS, caps);
       Integer yuvColorFormat =
           MediaCodecUtils.selectColorFormat(MediaCodecUtils.ENCODER_COLOR_FORMATS, caps);
-      // Exynos AVC encoders ignore timestamps for rate control; libwebrtc's own quirk handling.
-      BitrateAdjuster adjuster = isExynos(name) ? new FramerateBitrateAdjuster()
-                                                : new BaseBitrateAdjuster();
+      // Overshoot guard for every vendor; Exynos AVC encoders additionally ignore timestamps for
+      // rate control (libwebrtc's FramerateBitrateAdjuster quirk, kept inside the guard).
+      BitrateAdjuster adjuster = new GuardBitrateAdjuster(
+          isExynos(name), guardEnabled, "h264#" + encoderSerial.incrementAndGet());
       HardwareVideoEncoder encoder = new HardwareVideoEncoder(new TunedCodecFactory(),
           name, VideoCodecMimeType.H264, surfaceColorFormat, yuvColorFormat, info.params,
           KEY_FRAME_INTERVAL_SEC, /* forceKeyFrameIntervalMs= */ 0, adjuster, sharedContext);
@@ -266,6 +285,7 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
    * tuned format it is reset and configured again with fewer hints, finally with the stock format.
    */
   private static final class TunedCodec implements MediaCodecWrapper {
+    private static final String QTI_LOW_LATENCY = "vendor.qti-ext-enc-low-latency.enable";
     private final MediaCodec codec;
 
     TunedCodec(MediaCodec codec) {
@@ -303,17 +323,33 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
           ? source.getNumber(MediaFormat.KEY_FRAME_RATE, 30f).floatValue()
           : 30f;
       f.setInteger(MediaFormat.KEY_PRIORITY, 0); // 0 = real-time
-      // Provision the codec for at least 60 fps so each frame is encoded as fast as possible.
-      f.setFloat(MediaFormat.KEY_OPERATING_RATE, Math.max(fps, 60f));
+      // A lone encoder is provisioned for >= 60 fps so each frame finishes as fast as possible.
+      // With other sessions running, ask only for the real rate: over-provisioning one session can
+      // eat the hardware budget the next viewer needs. (This encoder is already counted.)
+      boolean othersRunning = liveHardwareEncoders.get() > 1;
+      f.setFloat(MediaFormat.KEY_OPERATING_RATE, othersRunning ? fps : Math.max(fps, 60f));
       f.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
       if (vendorAndLatency) {
         f.setInteger(MediaFormat.KEY_LATENCY, 1);
-        String name = codec.getName();
-        if (name.startsWith("c2.qti.") || name.startsWith("OMX.qcom.")) {
-          f.setInteger("vendor.qti-ext-enc-low-latency.enable", 1);
+        // Vendor keys only when the codec declares them (API 31+); unknown keys can make
+        // configure() fail on some HALs. API 30 cannot list them: keep the Qualcomm name check
+        // there (a rejected format falls back to the next attempt).
+        boolean qtiByName = Build.VERSION.SDK_INT < 31
+            && (codec.getName().startsWith("c2.qti.") || codec.getName().startsWith("OMX.qcom."));
+        if (qtiByName || supportsVendorParameter(QTI_LOW_LATENCY)) {
+          f.setInteger(QTI_LOW_LATENCY, 1);
         }
       }
       return f;
+    }
+
+    private boolean supportsVendorParameter(String key) {
+      if (Build.VERSION.SDK_INT < 31) return false;
+      try {
+        return codec.getSupportedVendorParameters().contains(key);
+      } catch (RuntimeException e) {
+        return false;
+      }
     }
 
     @Override

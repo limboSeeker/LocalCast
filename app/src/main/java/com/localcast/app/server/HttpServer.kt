@@ -44,6 +44,12 @@ class HttpServer(
         check(engine == null) { "already started" }
         var last: Throwable? = null
         for (port in preferredPort until preferredPort + attempts) {
+            // Ktor CIO binds asynchronously: a busy port surfaces as a BindException in a background
+            // coroutine (which crashed the app) instead of from start(). Probe it first.
+            if (!isPortFree(port)) {
+                last = BindException("port $port is busy")
+                continue
+            }
             val candidate = createEngine(port)
             try {
                 candidate.start(wait = false)
@@ -57,6 +63,21 @@ class HttpServer(
             }
         }
         throw IOException("No free port in $preferredPort..${preferredPort + attempts - 1}", last)
+    }
+
+    /**
+     * Same address-reuse semantics as Ktor CIO (reuseAddress = false), so a port still in TIME_WAIT
+     * after a quick restart is reported busy here too instead of failing inside CIO.
+     * A port taken between this probe and the bind can still fail late (milliseconds window).
+     */
+    private fun isPortFree(port: Int): Boolean = try {
+        java.net.ServerSocket().use {
+            it.reuseAddress = false
+            it.bind(java.net.InetSocketAddress(port))
+        }
+        true
+    } catch (e: IOException) {
+        false
     }
 
     fun stop() {

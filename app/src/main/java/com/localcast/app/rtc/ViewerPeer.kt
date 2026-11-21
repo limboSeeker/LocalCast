@@ -38,6 +38,12 @@ internal class ViewerPeer(
     private var closed = false
     private var connected = false
 
+    /** Started beyond the hardware encoder budget: VP8 at half resolution (engine thread). */
+    var softwareEncoder = false
+
+    /** ICE/DTLS connected (engine thread). */
+    val isConnected: Boolean get() = connected
+
     // Outbound bitrate from successive stats samples.
     private var lastBytesSent = -1L
     private var lastStatsTimestampUs = 0.0
@@ -64,7 +70,7 @@ internal class ViewerPeer(
             engine.videoTrack,
             RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, listOf(STREAM_ID)),
         )
-        engine.applyCodecPreferences(transceiver)
+        engine.applyCodecPreferences(transceiver, softwareEncoder)
         sender = transceiver.sender
         applySendParameters()
 
@@ -92,16 +98,18 @@ internal class ViewerPeer(
         try {
             val params = s.parameters
             params.degradationPreference = p.degradation
+            val maxBps = if (softwareEncoder) minOf(p.maxBitrateBps, SOFTWARE_MAX_BPS) else p.maxBitrateBps
             params.encodings.forEach { e ->
-                e.maxBitrateBps = p.maxBitrateBps
+                e.maxBitrateBps = maxBps
                 e.minBitrateBps = CaptureFormat.MIN_BITRATE_BPS
                 e.maxFramerate = p.fps
-                e.scaleResolutionDownBy = 1.0
+                // Software VP8 at full size would eat the CPU the capture pipeline needs.
+                e.scaleResolutionDownBy = if (softwareEncoder) 2.0 else 1.0
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
             }
             if (!s.setParameters(params)) Log.w(TAG, "$viewerId: setParameters rejected")
-            peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, p.startBitrateBps, p.maxBitrateBps)
+            peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, minOf(p.startBitrateBps, maxBps), maxBps)
         } catch (e: RuntimeException) {
             Log.w(TAG, "$viewerId: applySendParameters failed", e)
         }
@@ -182,6 +190,7 @@ internal class ViewerPeer(
             "rtx" to n(out, "retransmittedPacketsSent"),
             "nack" to n(out, "nackCount"),
             "pli" to n(out, "pliCount"),
+            "qp" to n(out, "qpSum"),
         )
         val prev = HashMap(diagPrev)
         diagPrev.clear()
@@ -200,7 +209,8 @@ internal class ViewerPeer(
                 "out=${perS("bytes")?.times(8 / 1000.0).f0()}kbps target=${n(out, "targetBitrate")?.div(1000).f0()}kbps " +
                 "avail=${n(pair, "availableOutgoingBitrate")?.div(1000).f0()}kbps " +
                 "encMs=${per("encT", "enc", 1000.0).f1()} pacerMs=${per("sendT", "pkts", 1000.0).f1()} " +
-                "rtx+${d("rtx").i()} nack+${d("nack").i()} pli+${d("pli").i()} " +
+                "qp=${per("qp", "enc", 1.0).f1()} rtx+${d("rtx").i()} nack+${d("nack").i()} pli+${d("pli").i()} " +
+                (if (softwareEncoder) "sw " else "") +
                 "rtt=${n(pair, "currentRoundTripTime")?.times(1000).f0()}ms " +
                 "ql=${out["qualityLimitationReason"]} ${n(out, "frameWidth").i()}x${n(out, "frameHeight").i()}",
         )
@@ -361,6 +371,7 @@ internal class ViewerPeer(
     private companion object {
         const val TAG = "LocalCast/Peer"
         const val DIAG_TAG = "LocalCast/Diag"
+        const val SOFTWARE_MAX_BPS = 2_500_000
         const val STREAM_ID = "localcast"
     }
 }

@@ -6,11 +6,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,7 +52,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.FilterQuality
@@ -307,13 +301,9 @@ fun LiveBadge(live: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (live) {
-            val pulse by rememberInfiniteTransition(label = "live").animateFloat(
-                initialValue = 1f,
-                targetValue = 0.35f,
-                animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-                label = "dot",
-            )
-            Box(Modifier.size(10.dp).alpha(pulse).clip(CircleShape).background(fg))
+            // Static on purpose: this screen is itself being cast, and an endless animation would
+            // keep the encoder and Wi-Fi busy at full frame rate while nothing else changes.
+            Box(Modifier.size(10.dp).clip(CircleShape).background(fg))
         } else {
             CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = fg)
         }

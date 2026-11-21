@@ -1,5 +1,7 @@
 package com.localcast.app.service
 
+import android.app.Activity
+import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -140,6 +143,7 @@ class CaptureService : LifecycleService() {
             }
             eng.updateSettings(s)
             CastStateStore.update { it.copy(pinRequired = s.requirePin) }
+            updateNotification() // the "New PIN" action depends on requirePin
         }
     }
 
@@ -159,6 +163,7 @@ class CaptureService : LifecycleService() {
         if (!started || stopping) return
         val pin = pinGuard.regeneratePin() // also revokes every token
         CastStateStore.update { it.copy(pin = pin) }
+        updateNotification()
         // Kick current viewers: they reconnect with a now-invalid token and get the PIN form.
         lifecycleScope.launch { signaling?.disconnectAll("pin_changed") }
     }
@@ -200,9 +205,9 @@ class CaptureService : LifecycleService() {
         if (engine != null || server != null) {
             runCatching { server?.stop() }
             runCatching { engine?.release() }
-            releaseLocks()
             CastStateStore.update { CastState() }
         }
+        releaseLocks() // idempotent; also drops the activity callbacks that reference this service
         super.onDestroy()
     }
 
@@ -262,6 +267,18 @@ class CaptureService : LifecycleService() {
     // ---- locks ----
 
     private fun acquireLocks() {
+        acquireWifiLocks()
+        // Keeps sockets alive if the screen turns off briefly; capped as a safety net.
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LocalCast:cast")
+            .apply {
+                setReferenceCounted(false)
+                acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+        application.registerActivityLifecycleCallbacks(activityCallbacks)
+    }
+
+    private fun acquireWifiLocks() {
         val wifi = applicationContext.getSystemService(WifiManager::class.java)
         @Suppress("DEPRECATION")
         val modes = listOf(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, WifiManager.WIFI_MODE_FULL_HIGH_PERF)
@@ -273,20 +290,43 @@ class CaptureService : LifecycleService() {
                 }
             }.onSuccess { wifiLocks += it }.onFailure { Log.w(TAG, "wifi lock $mode", it) }
         }
-        // Keeps sockets alive if the screen turns off briefly; capped as a safety net.
-        wakeLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LocalCast:cast")
-            .apply {
-                setReferenceCounted(false)
-                acquire(WAKE_LOCK_TIMEOUT_MS)
-            }
+    }
+
+    private fun releaseWifiLocks() {
+        wifiLocks.forEach { runCatching { if (it.isHeld) it.release() } }
+        wifiLocks.clear()
     }
 
     private fun releaseLocks() {
-        wifiLocks.forEach { runCatching { if (it.isHeld) it.release() } }
-        wifiLocks.clear()
+        runCatching { application.unregisterActivityLifecycleCallbacks(activityCallbacks) }
+        releaseWifiLocks()
         wakeLock?.let { runCatching { if (it.isHeld) it.release() } }
         wakeLock = null
+    }
+
+    /**
+     * Wi-Fi low-latency mode (no power save) is granted only while the app is in the foreground, and
+     * that is evaluated when the lock is acquired. The locks are first taken while the system
+     * screen-capture dialog is still on top, so they could stay inactive (`dumpsys wifi`:
+     * isFg=false). Re-taking them whenever our activity is shown makes the mode actually apply while
+     * the user is in the app. (Outside the app the platform turns it off by design.)
+     */
+    private val activityCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(activity: Activity) {
+            if (wifiLocks.isEmpty()) return
+            // New locks first, then drop the old ones: Wi-Fi never leaves low-latency mode between.
+            val old = wifiLocks.toList()
+            wifiLocks.clear()
+            acquireWifiLocks()
+            old.forEach { runCatching { if (it.isHeld) it.release() } }
+        }
+
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        override fun onActivityDestroyed(activity: Activity) = Unit
     }
 
     // ---- notification ----

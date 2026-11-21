@@ -23,9 +23,15 @@ object CaptureFormat {
     /**
      * Capture size for a display of [displayWidth]x[displayHeight] in its current orientation.
      * 720p/1080p scale the SHORT side to 720/1080 keeping the aspect ratio (never upscale);
-     * NATIVE keeps the display size. Both sides are even (MediaCodec requires 2x2 alignment).
+     * NATIVE keeps the display size. Sides are multiples of the encoder's alignment
+     * ([Alignment], 2x2 for most encoders; some MediaTek/Exynos encoders need 16).
      */
-    fun targetSize(displayWidth: Int, displayHeight: Int, mode: ResolutionMode): CaptureSize {
+    fun targetSize(
+        displayWidth: Int,
+        displayHeight: Int,
+        mode: ResolutionMode,
+        align: Alignment = Alignment.EVEN,
+    ): CaptureSize {
         require(displayWidth > 0 && displayHeight > 0) { "display size must be positive" }
         val shortSide = min(displayWidth, displayHeight)
         val longSide = max(displayWidth, displayHeight)
@@ -35,19 +41,26 @@ object CaptureFormat {
             ResolutionMode.NATIVE -> shortSide
         }.coerceAtMost(shortSide)
         val scale = targetShort.toDouble() / shortSide
-        val outShort = even(targetShort.toDouble())
-        val outLong = even(longSide * scale)
-        return if (displayWidth <= displayHeight) CaptureSize(outShort, outLong) else CaptureSize(outLong, outShort)
+        val portrait = displayWidth <= displayHeight
+        val shortAlign = if (portrait) align.width else align.height
+        val longAlign = if (portrait) align.height else align.width
+        val outShort = aligned(targetShort.toDouble(), shortAlign)
+        val outLong = aligned(longSide * scale, longAlign)
+        return if (portrait) CaptureSize(outShort, outLong) else CaptureSize(outLong, outShort)
     }
 
     /** Shrinks [size] in ~10 % steps (keeping aspect) until [isSupported] accepts it. */
-    fun fitTo(size: CaptureSize, isSupported: (Int, Int) -> Boolean): CaptureSize {
+    fun fitTo(
+        size: CaptureSize,
+        align: Alignment = Alignment.EVEN,
+        isSupported: (Int, Int) -> Boolean,
+    ): CaptureSize {
         if (isSupported(size.width, size.height)) return size
         var factor = 1.0
         var candidate = size
         repeat(25) {
             factor *= 0.9
-            candidate = CaptureSize(even(size.width * factor), even(size.height * factor))
+            candidate = CaptureSize(aligned(size.width * factor, align.width), aligned(size.height * factor, align.height))
             if (isSupported(candidate.width, candidate.height)) return candidate
         }
         return candidate
@@ -71,16 +84,17 @@ object CaptureFormat {
         preferSmooth: Boolean,
         displayRefreshHz: Float,
         hardwareEncoder: Boolean,
+        align: Alignment = Alignment.EVEN,
         isSupported: (Int, Int, Int) -> Boolean,
     ): Pair<CaptureSize, Int> {
         val mode = if (!hardwareEncoder && resolution != ResolutionMode.P720) ResolutionMode.P720 else resolution
-        val base = fitTo(targetSize(display.width, display.height, mode)) { w, h -> isSupported(w, h, 30) }
+        val base = fitTo(targetSize(display.width, display.height, mode, align), align) { w, h -> isSupported(w, h, 30) }
         if (!hardwareEncoder || fpsMode == FpsMode.FPS_30) return base to 30
         if (fpsMode == FpsMode.AUTO && displayRefreshHz < 59f) return base to 30
         if (isSupported(base.width, base.height, 60)) return base to 60
         val forced = fpsMode == FpsMode.FPS_60
         if (!forced && !preferSmooth) return base to 30
-        val scaled = fitTo(base) { w, h -> isSupported(w, h, 60) }
+        val scaled = fitTo(base, align) { w, h -> isSupported(w, h, 60) }
         val minScale = if (forced) MIN_SCALE_FOR_60_FORCED else MIN_SCALE_FOR_60_AUTO
         val ok = isSupported(scaled.width, scaled.height, 60) &&
             min(scaled.width, scaled.height) >= min(base.width, base.height) * minScale
@@ -100,5 +114,19 @@ object CaptureFormat {
     /** Start bitrate: high enough that the first frames are already sharp on a LAN. */
     fun startBitrateBps(maxBps: Int): Int = (maxBps * 0.6).roundToInt().coerceAtLeast(MIN_BITRATE_BPS)
 
-    private fun even(value: Double): Int = max(2, (value / 2.0).roundToInt() * 2)
+    /** Required multiples for width and height (from the encoder's VideoCapabilities). */
+    data class Alignment(val width: Int, val height: Int) {
+        companion object {
+            val EVEN = Alignment(2, 2)
+        }
+    }
+
+    /**
+     * Nearest even value for the usual 2-pixel alignment; for coarser alignments round DOWN, so the
+     * size never exceeds the captured content (no upscaling, no padding bars).
+     */
+    private fun aligned(value: Double, multiple: Int): Int {
+        val m = max(2, multiple)
+        return if (m == 2) max(2, (value / 2.0).roundToInt() * 2) else max(m, (value / m).toInt() * m)
+    }
 }

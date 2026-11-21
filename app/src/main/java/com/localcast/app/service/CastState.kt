@@ -21,6 +21,8 @@ data class CaptureInfo(
     val width: Int,
     val height: Int,
     val fps: Int,
+    /** 0 = normal; 1..3 = the stream is reduced because the device is warm / hot / critical. */
+    val thermalLevel: Int = 0,
 )
 
 /** Aggregated outbound stats of one viewer's PeerConnection (from getStats). */
