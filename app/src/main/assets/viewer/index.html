@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>LocalCast</title>
+<style>
+:root{--bg:#000;--card:#14161a;--line:#262a31;--fg:#e8eaed;--dim:#9aa0a6;--acc:#4f8cff;--ok:#34c759;--warn:#ffb020;--err:#ff5d5d;
+--sat:env(safe-area-inset-top,0px);--sar:env(safe-area-inset-right,0px);--sab:env(safe-area-inset-bottom,0px);--sal:env(safe-area-inset-left,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden;overscroll-behavior:none;
+font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+#stage{position:fixed;left:0;top:0;width:100%;height:100vh;height:100dvh;background:#000;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+#stage.idle{cursor:none}
+video{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;display:block;opacity:0;transition:opacity .25s}
+#stage.live video{opacity:1}
+video::-webkit-media-controls{display:none!important}
+.card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,380px);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 24px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.card[hidden],#pill[hidden],#playbtn[hidden],#stats[hidden],#pinform[hidden],#spin[hidden]{display:none}
+.logo{width:44px;height:44px;margin:0 auto 14px;color:var(--acc)}
+h1{font-size:20px;font-weight:600;margin:0 0 6px}
+#sub{color:var(--dim);margin:0 0 4px;min-height:1.4em}
+#spin{width:28px;height:28px;margin:14px auto 4px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .9s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#pinform{margin-top:16px}
+#pin{width:100%;font:600 32px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.4em;text-align:center;padding:12px 8px 12px calc(8px + .4em);background:#0b0c0e;color:var(--fg);border:1px solid var(--line);border-radius:12px;outline:none}
+#pin:focus{border-color:var(--acc)}
+#err{color:var(--err);min-height:1.4em;margin:10px 0 0;font-size:14px}
+button{font:inherit;color:inherit;cursor:pointer}
+#go{width:100%;margin-top:10px;padding:13px;border:0;border-radius:12px;background:var(--acc);color:#fff;font-weight:600;font-size:16px}
+#go:disabled{opacity:.4;cursor:default}
+#pill{position:absolute;left:calc(12px + var(--sal));top:calc(12px + var(--sat));display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(20,22,26,.8);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:13px;max-width:70vw}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--warn);flex:none}
+#bar{position:absolute;right:calc(12px + var(--sar));top:calc(12px + var(--sat));display:flex;gap:8px;transition:opacity .25s}
+#stage.idle #bar{opacity:0;pointer-events:none}
+#bar button{width:42px;height:42px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(20,22,26,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#bar button:hover{background:rgba(50,54,62,.85)}
+#bar button.on{color:var(--acc)}
+#bar svg{width:22px;height:22px}
+#playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:14px 22px;border:0;border-radius:12px;background:var(--acc);color:#fff;font-weight:600;font-size:16px}
+#stats{position:absolute;left:calc(10px + var(--sal));bottom:calc(10px + var(--sab));margin:0;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.6);color:#d8f0d8;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;pointer-events:none;max-width:calc(100vw - 20px)}
+</style>
+</head>
+<body>
+<div id="stage">
+<video id="v" autoplay muted playsinline webkit-playsinline disablepictureinpicture></video>
+<div id="card" class="card" hidden>
+<svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/><path d="M3 8a6 6 0 0 0 0 8M21 8a6 6 0 0 1 0 8"/></svg>
+<h1 id="title">LocalCast</h1>
+<p id="sub"></p>
+<div id="spin" hidden></div>
+<form id="pinform" autocomplete="off">
+<input id="pin" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="••••••" aria-label="PIN">
+<p id="err" role="alert"></p>
+<button id="go" type="submit" disabled>Підключитися</button>
+</form>
+</div>
+<div id="pill" hidden><span id="dot"></span><span id="ptxt"></span></div>
+<div id="bar">
+<button id="bi" type="button" aria-label="Статистика (S)" title="Статистика (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
+<button id="bf" type="button" aria-label="На весь екран (F)" title="На весь екран (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</div>
+<button id="playbtn" type="button" hidden>Натисніть, щоб відтворити</button>
+<pre id="stats" hidden></pre>
+</div>
+<script>
+(function () {
+'use strict';
+var BACK = [500, 1000, 2000, 4000, 5000];
+var TOKEN_KEY = 'localcast.token';
+function $(id) { return document.getElementById(id); }
+var stage = $('stage'), video = $('v'), card = $('card'), titleEl = $('title'), subEl = $('sub'), spin = $('spin'),
+    form = $('pinform'), pinEl = $('pin'), errEl = $('err'), goBtn = $('go'), pill = $('pill'), dot = $('dot'),
+    ptxt = $('ptxt'), playBtn = $('playbtn'), statsEl = $('stats'), biBtn = $('bi');
+
+var state = 'connecting';
+var info = null, pin = null, token = null;
+var ws = null, pc = null, remoteSet = false, pendingIce = [];
+var timer = null, watchdog = null, discTimer = null, lockTimer = null, hideTimer = null;
+var attempt = 0, joined = false, streamInfo = null, stoppedMsg = null, senderInfo = null, latencyEst = null;
+var prev = null, lastStats = null, latency = null, lastFrameT = 0, lastFrames = 0, pollN = 0, pollTimer = null;
+var wakeLock = null, lastClick = 0;
+
+try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
+
+/* ---------- UI ---------- */
+function setState(s) { state = s; stage.setAttribute('data-state', s); }
+function showCard(o) {
+  titleEl.textContent = o.title || 'LocalCast';
+  subEl.textContent = o.sub || '';
+  spin.hidden = !o.spin;
+  form.hidden = !o.form;
+  errEl.textContent = o.err || '';
+  card.hidden = false;
+  pill.hidden = true;
+  if (o.form) { updateGo(); if (o.focus) { try { pinEl.focus(); } catch (e) {} } }
+}
+function hideCard() { card.hidden = true; }
+function showPill(text, color) { ptxt.textContent = text; dot.style.background = color || 'var(--warn)'; pill.hidden = false; }
+function live(on) { if (on) stage.classList.add('live'); else stage.classList.remove('live'); }
+function updateGo() { goBtn.disabled = pinEl.value.length !== 6 || !!lockTimer; }
+
+function later(ms, fn) {
+  clearTimeout(timer);
+  timer = setTimeout(function () { timer = null; fn(); }, ms);
+}
+function stopTimers() { clearTimeout(timer); timer = null; clearInterval(lockTimer); lockTimer = null; }
+
+/* ---------- PIN form ---------- */
+pinEl.addEventListener('input', function () {
+  var v = pinEl.value.replace(/\D/g, '').slice(0, 6);
+  if (v !== pinEl.value) pinEl.value = v;
+  updateGo();
+});
+form.addEventListener('submit', function (e) {
+  e.preventDefault();
+  if (goBtn.disabled) return;
+  pin = pinEl.value;
+  errEl.textContent = '';
+  connect();
+});
+function showPin(err, sub) {
+  stopTimers();
+  setState(err ? 'denied' : 'pin');
+  live(false);
+  pinEl.value = '';
+  showCard({ title: 'Введіть PIN', sub: sub || 'Шестизначний код на екрані телефона', form: true, err: err, focus: true });
+}
+
+/* ---------- start ---------- */
+function start() {
+  var m = /[#&]pin=(\d{4,8})/.exec(location.hash);
+  if (m) pin = m[1];
+  if (location.hash) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
+  loadInfo();
+}
+function loadInfo() {
+  setState('connecting');
+  showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true });
+  fetch('/api/info', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+    info = j;
+    if (info.pinRequired && !pin && !token) showPin(); else connect();
+  }).catch(function () {
+    later(2000, loadInfo);
+  });
+}
+
+/* ---------- WebSocket ---------- */
+function send(o) {
+  if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(o)); } catch (e) {} }
+}
+function dropWS() {
+  var w = ws; ws = null;
+  if (w) { try { w.close(); } catch (e) {} }
+}
+function connect() {
+  stopTimers();
+  clearTimeout(watchdog);
+  if (ws) dropWS();
+  if (!joined) { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true }); }
+  var w;
+  try { w = new WebSocket('ws://' + location.host + '/ws'); } catch (e) { reconnect(); return; }
+  ws = w;
+  arm(8000);
+  w.onopen = function () {
+    if (w !== ws) return;
+    var h = { type: 'hello', userAgent: navigator.userAgent };
+    if (pin) h.pin = pin; else if (token) h.token = token;
+    w.send(JSON.stringify(h));
+  };
+  w.onmessage = function (e) { if (w === ws) onMsg(e.data); };
+  w.onclose = function () { if (w === ws) { ws = null; closePC(); reconnect(); } };
+  w.onerror = function () {};
+}
+// watchdog: if nothing useful happens within ms -> full reconnect
+function arm(ms) {
+  clearTimeout(watchdog);
+  watchdog = setTimeout(function () { if (state !== 'playing') { dropWS(); closePC(); reconnect(); } }, ms);
+}
+
+function onMsg(data) {
+  var m; try { m = JSON.parse(data); } catch (e) { return; }
+  switch (m.type) {
+    case 'welcome':
+      token = m.token; pin = null; joined = true; stoppedMsg = null;
+      try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+      arm(10000);
+      break;
+    case 'offer': handleOffer(m.sdp); break;
+    case 'ice': handleIce(m.candidate); break;
+    case 'sender': senderInfo = m; break;
+    case 'state':
+      streamInfo = m;
+      if (m.streaming === false) showPill('Трансляцію призупинено', 'var(--warn)');
+      else if (state === 'playing') pill.hidden = true;
+      break;
+    case 'bye':
+      closePC(); dropWS(); joined = false;
+      if (m.reason === 'pin_changed') {
+        token = null;
+        try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
+        if (info && info.pinRequired) { live(false); showPin('PIN змінено на телефоні. Введіть новий PIN'); break; }
+      }
+      setState('waiting'); live(false);
+      stoppedMsg = 'Трансляцію зупинено на телефоні. Очікування…';
+      showCard({ title: 'LocalCast', sub: stoppedMsg, spin: true });
+      later(3000, connect);
+      break;
+    case 'denied': onDenied(m); break;
+  }
+}
+
+function onDenied(m) {
+  clearTimeout(watchdog);
+  dropWS(); closePC(); live(false);
+  switch (m.reason) {
+    case 'pin':
+      pin = null;
+      showPin('Невірний PIN');
+      break;
+    case 'locked':
+      pin = null;
+      var left = Math.max(1, m.retryAfterSec || 60);
+      var tick = function () {
+        if (left <= 0) { clearInterval(lockTimer); lockTimer = null; errEl.textContent = ''; updateGo(); return; }
+        errEl.textContent = 'Забагато спроб. Спробуйте через ' + left + ' с';
+        left--;
+      };
+      showPin();
+      setState('denied');
+      stopTimers();
+      tick(); lockTimer = setInterval(tick, 1000); updateGo();
+      break;
+    case 'token':
+      token = null;
+      try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
+      joined = false;
+      if (pin || !info || !info.pinRequired) connect(); else showPin();
+      break;
+    case 'full':
+      setState('denied');
+      showCard({ title: 'LocalCast', sub: 'Досягнуто ліміту глядачів', spin: true });
+      later(5000, connect);
+      break;
+    case 'not_streaming':
+      setState('waiting');
+      showCard({ title: 'LocalCast', sub: 'Трансляцію ще не запущено. Очікування…', spin: true });
+      later(2000, connect);
+      break;
+    default:
+      setState('denied');
+      showCard({ title: 'LocalCast', sub: 'Помилка підключення. Повторюємо…', spin: true });
+      later(3000, connect);
+  }
+}
+
+/* ---------- reconnect ---------- */
+function reconnect() {
+  if (timer || lockTimer) return;
+  if (joined) { setState('reconnecting'); showPill('Перепідключення…'); card.hidden = true; }
+  else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: 'Підключення…', spin: true }); }
+  var d = BACK[Math.min(attempt, BACK.length - 1)];
+  attempt++;
+  later(d, function () {
+    if (ws && ws.readyState === 1) { closePC(); send({ type: 'restart' }); arm(8000); }
+    else connect();
+  });
+}
+
+/* ---------- WebRTC ---------- */
+function closePC() {
+  clearTimeout(discTimer);
+  var p = pc; pc = null; remoteSet = false; pendingIce = []; prev = null; latency = null; latencyEst = null; lastFrames = 0;
+  if (p) {
+    p.ontrack = p.onicecandidate = p.onconnectionstatechange = p.oniceconnectionstatechange = null;
+    try { p.close(); } catch (e) {}
+  }
+}
+function newPC() {
+  closePC();
+  var p = new RTCPeerConnection({ iceServers: [], bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
+  pc = p;
+  p.onicecandidate = function (e) {
+    if (p !== pc || !e.candidate) return;
+    send({ type: 'ice', candidate: { candidate: e.candidate.candidate, sdpMid: e.candidate.sdpMid, sdpMLineIndex: e.candidate.sdpMLineIndex || 0 } });
+  };
+  p.ontrack = function (e) {
+    if (p !== pc || e.track.kind !== 'video') return;
+    video.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+    tune(e.receiver);
+    tryPlay();
+  };
+  var chk = function () {
+    if (p !== pc) return;
+    var s = p.connectionState || p.iceConnectionState;
+    if (s === 'connected' || s === 'completed') { clearTimeout(discTimer); }
+    else if (s === 'failed') { clearTimeout(discTimer); lost(); }
+    else if (s === 'disconnected') { clearTimeout(discTimer); discTimer = setTimeout(function () { if (p === pc) lost(); }, 3000); }
+  };
+  p.onconnectionstatechange = chk;
+  p.oniceconnectionstatechange = chk;
+  return p;
+}
+function lost() {
+  closePC();
+  if (state === 'playing') { setState('reconnecting'); showPill('Перепідключення…'); }
+  reconnect();
+}
+function tune(r) {
+  try {
+    if (!r) return;
+    if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
+    else if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
+  } catch (e) {}
+}
+function preferCodecs(p) {
+  try {
+    if (!window.RTCRtpReceiver || !RTCRtpReceiver.getCapabilities) return;
+    var caps = RTCRtpReceiver.getCapabilities('video');
+    if (!caps || !caps.codecs) return;
+    var rank = function (c) {
+      var mt = c.mimeType.toLowerCase();
+      if (mt === 'video/h264') return /packetization-mode=1/.test(c.sdpFmtpLine || '') ? 0 : 1;
+      if (/rtx|red|ulpfec|flexfec/.test(mt)) return 3;
+      return 2;
+    };
+    var list = caps.codecs.map(function (c, i) { return { c: c, i: i, r: rank(c) }; })
+      .sort(function (a, b) { return a.r - b.r || a.i - b.i; }).map(function (x) { return x.c; });
+    p.getTransceivers().forEach(function (t) {
+      var k = (t.receiver && t.receiver.track && t.receiver.track.kind) || '';
+      if (k === 'video' && t.setCodecPreferences) { try { t.setCodecPreferences(list); } catch (e) {} }
+    });
+  } catch (e) {}
+}
+function handleOffer(sdp) {
+  var p;
+  try { p = newPC(); } catch (e) { return; }
+  video.srcObject = null;
+  p.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
+    if (p !== pc) return;
+    remoteSet = true;
+    preferCodecs(p);
+    var q = pendingIce; pendingIce = [];
+    q.forEach(function (c) { p.addIceCandidate(c).catch(function () {}); });
+    return p.createAnswer().then(function (a) { return p.setLocalDescription(a); }).then(function () {
+      if (p === pc) send({ type: 'answer', sdp: p.localDescription.sdp });
+    });
+  }).catch(function () { if (p === pc) lost(); });
+  arm(10000);
+}
+function handleIce(c) {
+  if (!c) return;
+  var init = { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex };
+  if (!pc || !remoteSet) { pendingIce.push(init); return; }
+  pc.addIceCandidate(init).catch(function () {});
+}
+
+/* ---------- playback ---------- */
+function tryPlay() {
+  var pr;
+  try { pr = video.play(); } catch (e) {}
+  if (pr && pr.then) pr.then(function () { playBtn.hidden = true; }, function () { playBtn.hidden = false; });
+}
+playBtn.addEventListener('click', function (e) { e.stopPropagation(); tryPlay(); });
+function onFrames() {
+  // A late frame callback can arrive after the session was torn down (bye, PIN form): ignore it.
+  if (!pc || !joined) return;
+  lastFrameT = Date.now();
+  if (state === 'playing') return;
+  setState('playing');
+  clearTimeout(watchdog);
+  attempt = 0;
+  hideCard(); pill.hidden = true; live(true);
+  if (streamInfo && streamInfo.streaming === false) showPill('Трансляцію призупинено');
+  getWake();
+}
+function frameCb(now, md) {
+  onFrames();
+  if (md && md.captureTime && md.expectedDisplayTime) {
+    var l = md.expectedDisplayTime - md.captureTime;
+    if (l >= 0 && l <= 5000) latency = latency === null ? l : latency * 0.9 + l * 0.1;
+  }
+  video.requestVideoFrameCallback(frameCb);
+}
+if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(frameCb);
+
+function getWake() {
+  try {
+    if (navigator.wakeLock && !wakeLock) {
+      navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; l.addEventListener('release', function () { wakeLock = null; }); }, function () {});
+    }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') return;
+  if (state === 'playing') getWake();
+  if (state !== 'playing' && state !== 'reconnecting') return;
+  var f0 = lastFrames;
+  setTimeout(function () {
+    if (document.visibilityState !== 'visible' || !joined) return;
+    if (lastFrames === f0 && Date.now() - lastFrameT > 2000) recoverMedia();
+  }, 1200);
+});
+
+/* ---------- stats ---------- */
+function num(x) { return typeof x === 'number' && isFinite(x) ? x : null; }
+function fmt(x, d, u) { return x === null || x === undefined ? 'н/д' : x.toFixed(d) + (u || ''); }
+// Phone re-sends the picture at >= 2 fps even when the screen is static, so a longer gap means
+// the media path is dead even though ICE may still look "connected".
+var STALL_MS = 4000;
+function recoverMedia() {
+  closePC();
+  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill('Перепідключення…'); send({ type: 'restart' }); arm(8000); }
+  else { dropWS(); reconnect(); }
+}
+function poll() {
+  var p = pc;
+  if (!p) return;
+  if (p.signalingState === 'closed') { if (state === 'playing') lost(); return; }
+  if (state === 'playing' && lastFrameT && Date.now() - lastFrameT > STALL_MS && document.visibilityState === 'visible') {
+    recoverMedia();
+    return;
+  }
+  p.getStats().then(function (rep) {
+    if (p !== pc) return;
+    var inb = null, codecs = {}, pairs = [], selId = null;
+    rep.forEach(function (r) {
+      if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'video' && !r.isRemote) inb = r;
+      else if (r.type === 'codec') codecs[r.id] = r;
+      else if (r.type === 'candidate-pair') pairs.push(r);
+      else if (r.type === 'transport' && r.selectedCandidatePairId) selId = r.selectedCandidatePairId;
+    });
+    if (!inb) return;
+    var now = performance.now(), s = {};
+    var fd = num(inb.framesDecoded) || 0, bytes = num(inb.bytesReceived) || 0;
+    var jbd = num(inb.jitterBufferDelay), jbc = num(inb.jitterBufferEmittedCount), dec = num(inb.totalDecodeTime);
+    var dt = prev ? (now - prev.t) / 1000 : 0;
+    s.framesDecoded = fd;
+    s.fps = num(inb.framesPerSecond);
+    if (s.fps === null && dt > 0) s.fps = (fd - prev.fd) / dt;
+    s.width = num(inb.frameWidth) || video.videoWidth || null;
+    s.height = num(inb.frameHeight) || video.videoHeight || null;
+    s.bitrateKbps = dt > 0 ? (bytes - prev.bytes) * 8 / dt / 1000 : null;
+    s.jitterBufferMs = null; s.decodeMs = null;
+    if (prev) {
+      if (jbd !== null && jbc !== null && prev.jbc !== null && jbc > prev.jbc) s.jitterBufferMs = (jbd - prev.jbd) / (jbc - prev.jbc) * 1000;
+      if (dec !== null && prev.dec !== null && fd > prev.fd) s.decodeMs = (dec - prev.dec) / (fd - prev.fd) * 1000;
+    }
+    s.framesDropped = num(inb.framesDropped);
+    s.packetsLost = num(inb.packetsLost);
+    var c = inb.codecId && codecs[inb.codecId];
+    s.codec = c && c.mimeType ? c.mimeType.replace(/^video\//i, '') : null;
+    var pair = null;
+    if (selId) pairs.forEach(function (x) { if (x.id === selId) pair = x; });
+    if (!pair) pairs.forEach(function (x) { if (!pair && x.state === 'succeeded' && (x.nominated || x.selected)) pair = x; });
+    s.rttMs = pair && num(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null;
+    s.latencyMs = latency;
+    s.latencyEstimated = false;
+    if (latency === null && s.jitterBufferMs !== null && s.rttMs !== null) {
+      // No capture timestamp from the browser: sum the measurable parts of the pipeline.
+      // capture/composition (1 source frame) + encode + send queue + one-way network (RTT/2)
+      // + jitter buffer + decode + display (1 vsync).
+      var srcFps = (streamInfo && streamInfo.fps) || 30;
+      var est = 1000 / srcFps + (senderInfo && num(senderInfo.encodeMs) || 0) + (senderInfo && num(senderInfo.sendDelayMs) || 0)
+        + s.rttMs / 2 + s.jitterBufferMs + (s.decodeMs || 0) + 1000 / 60;
+      latencyEst = latencyEst === null ? est : latencyEst * 0.7 + est * 0.3;
+      s.latencyMs = latencyEst;
+      s.latencyEstimated = true;
+    }
+    prev = { t: now, fd: fd, bytes: bytes, jbd: jbd, jbc: jbc, dec: dec };
+    if (fd > lastFrames) { lastFrames = fd; lastFrameT = Date.now(); onFrames(); }
+    tune(p.getReceivers && p.getReceivers().filter(function (r) { return r.track && r.track.kind === 'video'; })[0]);
+    lastStats = s;
+    if (!statsEl.hidden) renderStats(s);
+    if (++pollN % 2 === 0 && state === 'playing') report(s);
+  }).catch(function () {});
+}
+function renderStats(s) {
+  var res = s.width ? s.width + '×' + s.height : 'н/д';
+  var lines = [
+    'Затримка     ' + (s.latencyMs === null || s.latencyMs === undefined ? 'н/д' : (s.latencyEstimated ? '≈' : '') + s.latencyMs.toFixed(0) + ' мс' + (s.latencyEstimated ? ' (оцінка)' : '')),
+    'FPS          ' + fmt(s.fps, 1),
+    'Розмір       ' + res,
+    'Бітрейт      ' + (s.bitrateKbps === null ? 'н/д' : (s.bitrateKbps / 1000).toFixed(2) + ' Мбіт/с'),
+    'Кодек        ' + (s.codec || 'н/д'),
+    'Енкодер      ' + (senderInfo && senderInfo.encoder ? senderInfo.encoder + (senderInfo.hardware === true ? ' (апаратний)' : senderInfo.hardware === false ? ' (програмний)' : '') : 'н/д'),
+    'Кодування    ' + fmt(senderInfo ? num(senderInfo.encodeMs) : null, 1, ' мс'),
+    'Джитер-буфер ' + fmt(s.jitterBufferMs, 0, ' мс'),
+    'Декодування  ' + fmt(s.decodeMs, 1, ' мс'),
+    'RTT          ' + fmt(s.rttMs, 0, ' мс'),
+    'Пропущено    ' + (s.framesDropped === null ? 'н/д' : s.framesDropped) + ' кадрів',
+    'Втрачено     ' + (s.packetsLost === null ? 'н/д' : s.packetsLost) + ' пакетів'
+  ];
+  if (streamInfo && streamInfo.width) lines.push('Телефон      ' + streamInfo.width + '×' + streamInfo.height + ' @' + streamInfo.fps);
+  statsEl.textContent = lines.join('\n');
+}
+function report(s) {
+  var o = {}, put = function (k, v, d) { if (v !== null && v !== undefined) o[k] = d === undefined ? v : Math.round(v * d) / d; };
+  put('fps', s.fps, 10); put('width', s.width); put('height', s.height); put('bitrateKbps', s.bitrateKbps, 10);
+  put('latencyMs', s.latencyMs, 10); if (s.latencyMs !== null && s.latencyMs !== undefined) o.latencyEstimated = !!s.latencyEstimated; put('rttMs', s.rttMs, 10); put('jitterBufferMs', s.jitterBufferMs, 10);
+  put('decodeMs', s.decodeMs, 100); put('framesDropped', s.framesDropped); put('packetsLost', s.packetsLost);
+  if (s.codec) o.codec = s.codec;
+  send({ type: 'report', stats: o });
+}
+function toggleStats() { statsEl.hidden = !statsEl.hidden; biBtn.classList.toggle('on', !statsEl.hidden); if (!statsEl.hidden && lastStats) renderStats(lastStats); }
+
+/* ---------- controls ---------- */
+function toggleFs() {
+  var d = document;
+  if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  if (stage.requestFullscreen) stage.requestFullscreen().catch(function () {});
+  else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
+  else if (video.webkitEnterFullscreen) { try { video.webkitEnterFullscreen(); } catch (e) {} }
+}
+function wake() {
+  stage.classList.remove('idle');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(function () { if (state === 'playing') stage.classList.add('idle'); }, 3000);
+}
+['pointermove', 'pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, wake, { passive: true }); });
+stage.addEventListener('click', function (e) {
+  if (e.target.closest && e.target.closest('button,form,.card')) return;
+  var t = Date.now();
+  if (t - lastClick < 350) { lastClick = 0; toggleFs(); } else lastClick = t;
+});
+$('bf').addEventListener('click', toggleFs);
+biBtn.addEventListener('click', toggleStats);
+document.addEventListener('keydown', function (e) {
+  if (e.target === pinEl || e.ctrlKey || e.metaKey || e.altKey) return;
+  var k = e.key.toLowerCase();
+  if (k === 's' || k === 'і' || k === 'ы') toggleStats();
+  else if (k === 'f' || k === 'а') toggleFs();
+});
+document.addEventListener('fullscreenchange', wake);
+window.addEventListener('online', function () { if (state !== 'playing' && !timer) { dropWS(); closePC(); attempt = 0; reconnect(); } });
+
+window.__localcast = {
+  get state() { return state; },
+  get stats() { return lastStats; },
+  get pc() { return pc; },
+  get ws() { return ws; }
+};
+
+pollTimer = setInterval(poll, 1000);
+wake();
+start();
+})();
+</script>
+</body>
+</html>

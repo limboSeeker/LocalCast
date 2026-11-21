@@ -1,0 +1,12 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.cxx/
+.externalNativeBuild/
+/tools/e2e/node_modules/
+/tools/e2e/out/

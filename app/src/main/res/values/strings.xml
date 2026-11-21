@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Core strings (service, notification). UI screen strings live in strings_ui.xml. -->
+    <string name="app_name">LocalCast</string>
+    <string name="notif_channel_name">Трансляція екрана</string>
+    <string name="notif_channel_desc">Показує, що екран зараз транслюється</string>
+    <string name="notif_title_live">Трансляція екрана увімкнена</string>
+    <string name="notif_title_starting">Запуск трансляції…</string>
+    <string name="notif_text_viewers">Глядачів: %1$d · %2$s</string>
+    <string name="notif_text_no_network">Немає Wi-Fi або точки доступу</string>
+    <string name="notif_action_stop">Зупинити</string>
+    <string name="error_projection_denied">Дозвіл на запис екрана не надано</string>
+    <string name="error_server_start">Не вдалося запустити сервер (порти %1$d–%2$d зайняті)</string>
+    <string name="error_capture">Помилка захоплення екрана: %1$s</string>
+    <string name="error_capture_stopped">Трансляцію зупинено системою</string>
+</resources>
