@@ -8,6 +8,7 @@ import android.media.MediaCodecInfo
 import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import android.view.WindowManager
@@ -61,6 +62,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         val startBitrateBps: Int,
         val fps: Int,
         val degradation: RtpParameters.DegradationPreference,
+        /** Software overflow ("lite") streams: frame rate and scaleResolutionDownBy. */
+        val liteFps: Int = minOf(fps, 30),
+        val liteScale: Double = 1.0,
     )
 
     private val appContext = context.applicationContext
@@ -75,6 +79,10 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     @Volatile internal var sendProfile = SendProfile(8_000_000, 4_800_000, 30, RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE)
         private set
 
+    /** Per-viewer bitrate caps from splitting the Wi-Fi between the viewers ([LoadPolicy.shares]). */
+    @Volatile internal var shares = LoadPolicy.Shares(sendProfile.maxBitrateBps, LoadPolicy.LITE_MAX_BPS)
+        private set
+
     @Volatile override var isStreaming: Boolean = false
         private set
 
@@ -84,6 +92,10 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private var encoderProbe: EncoderCaps? = null
     private var thermal: ThermalGovernor? = null
     private var h264RetryTask: ScheduledFuture<*>? = null
+
+    /** Hardware sessions the device held when it last refused one, trusted for [SESSION_LIMIT_MS]. */
+    private var sessionHardwareLimit: Int? = null
+    private var sessionHardwareLimitUntilMs = 0L
     private var helper: SurfaceTextureHelper? = null
     private var capturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
@@ -136,9 +148,21 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 peer.closeNow()
                 return@post
             }
-            peer.softwareEncoder = hardwareSessionsExhausted()
-            if (peer.softwareEncoder) Log.i(TAG, "$viewerId: hardware encoder budget used up — starting on VP8")
+            when (val tier = admission()) {
+                LoadPolicy.Tier.BUSY -> {
+                    Log.w(DIAG_TAG, "$viewerId turned away: ${loadLine()}")
+                    peer.rejectBusy()
+                    return@post
+                }
+                LoadPolicy.Tier.SOFTWARE, LoadPolicy.Tier.HARDWARE -> {
+                    // On a device with hardware H.264 every VP8 stream is a lite overflow stream (also for a
+            // browser without H.264). It stays lite until it reconnects, even if hardware frees up.
+                    peer.softwareEncoder = tier == LoadPolicy.Tier.SOFTWARE && deviceHasHardware()
+                    if (peer.softwareEncoder) Log.i(DIAG_TAG, "$viewerId on lite VP8: ${loadLine()}")
+                }
+            }
             peers[viewerId] = peer
+            rebalance()
             peer.negotiate()
         }
         return peer
@@ -272,22 +296,62 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
             } else {
                 RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             },
+            liteFps = LoadPolicy.liteFps(fps, heat),
+            liteScale = LoadPolicy.liteScale(size.width, size.height),
         )
         return size to fps
     }
 
+    private fun deviceHasHardware(): Boolean = encoderFactory?.hardwareH264Name != null
+
     /**
-     * True when a new viewer should start on software VP8 because the device's concurrent hardware
-     * H.264 sessions are used up. Only a limit the device itself demonstrated counts (vendor
-     * performance points are a minimum guarantee, not a ceiling); without one we keep trying
-     * hardware and a repeated failure teaches the limit. Compared with the encoders actually running
-     * plus hardware viewers that are still connecting (their encoder starts after negotiation).
+     * Hardware sessions the device is known to hold: a limit it demonstrated (stored after a
+     * repeated refusal) or the count at its last refusal in this broadcast. Null while unknown —
+     * then hardware is tried and a refusal is caught in [onPeerEncoder]. Vendor performance points
+     * are a minimum guarantee, not a ceiling, so they are not used here.
      */
-    private fun hardwareSessionsExhausted(): Boolean {
-        if (encoderFactory?.isH264Offered != true) return false
-        val budget = EncoderProbe.learnedBudget(appContext, encoderProbe?.codecName) ?: return false
-        val starting = peers.values.count { !it.softwareEncoder && !it.isConnected }
-        return TunedVideoEncoderFactory.getLiveHardwareEncoders() + starting >= budget
+    private fun hardwareBudget(): Int? {
+        val learned = EncoderProbe.learnedBudget(appContext, encoderProbe?.codecName)
+        val session = sessionHardwareLimit?.takeIf { SystemClock.elapsedRealtime() < sessionHardwareLimitUntilMs }
+        return listOfNotNull(learned, session).minOrNull()
+    }
+
+    private fun softwareBudget(): Int = LoadPolicy.softwareBudget(
+        Runtime.getRuntime().availableProcessors(),
+        deviceHasHardware(),
+        thermal?.level ?: ThermalGovernor.Level.NORMAL,
+    )
+
+    private fun softwareSessions(): Int =
+        if (deviceHasHardware()) peers.values.count { it.softwareEncoder } else peers.size
+
+    /** Hardware encoders running plus hardware viewers still connecting (their encoder starts later). */
+    private fun hardwareInUse(): Int =
+        TunedVideoEncoderFactory.getLiveHardwareEncoders() + peers.values.count { !it.softwareEncoder && it.isStarting }
+
+    private fun admission(): LoadPolicy.Tier = LoadPolicy.admit(
+        hardwareOffered = encoderFactory?.isH264Offered == true,
+        hardwareBudget = hardwareBudget(),
+        hardwareInUse = hardwareInUse(),
+        softwareInUse = softwareSessions(),
+        softwareBudget = softwareBudget(),
+    )
+
+    private fun loadLine(): String =
+        "viewers=${peers.size} hw=${hardwareInUse()}/${hardwareBudget() ?: "?"} " +
+            "sw=${softwareSessions()}/${softwareBudget()} thermal=${thermal?.level ?: ThermalGovernor.Level.NORMAL}"
+
+    /** Re-splits the Wi-Fi between the viewers and applies the caps to every sender. */
+    private fun rebalance() {
+        val lite = peers.values.count { it.softwareEncoder }
+        val link = LoadPolicy.linkBudgetBps(WifiBand.currentMhz(appContext))
+        val next = LoadPolicy.shares(sendProfile.maxBitrateBps, link, peers.size - lite, lite)
+        if (next != shares) {
+            Log.i(DIAG_TAG, "bitrate split: ${peers.size} viewers ($lite lite), link ${link / 1_000_000} Mbps -> " +
+                "${next.fullBps / 1000} / ${next.liteBps / 1000} kbps")
+        }
+        shares = next
+        peers.values.forEach { it.applySendParameters() }
     }
 
     private fun recomputeFormat() {
@@ -301,7 +365,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
             refresher?.requestFrame()
         }
         listener.onCaptureInfo(captureInfo(size, fps)) // also carries the thermal level
-        peers.values.forEach { it.applySendParameters() }
+        rebalance()
     }
 
     private fun shutdownInternal() {
@@ -388,8 +452,47 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     }
 
     internal fun onPeerClosed(peer: ViewerPeer) {
-        peers.remove(peer.viewerId)
+        if (peers.remove(peer.viewerId) != null && isStreaming) rebalance()
         listener.onViewerConnection(peer.viewerId, false)
+    }
+
+    /** Start bitrate for [peer]'s (re)negotiation: gentle when others are already watching. */
+    internal fun startBitrateFor(peer: ViewerPeer, maxBps: Int): Int =
+        LoadPolicy.startBps(maxBps, peers.values.count { it !== peer && it.isConnected })
+
+    /**
+     * Codec and encoder seen in [peer]'s stats. On a device with hardware H.264, VP8 on a viewer
+     * that was given hardware means the encoder refused it (session limit) and libwebrtc switched
+     * it to VP8 at full size, which would eat the CPU: make it a lite stream, or turn the viewer
+     * away when the CPU budget is used up.
+     */
+    internal fun onPeerEncoder(peer: ViewerPeer, codec: String?, hardware: Boolean?) {
+        if (peers[peer.viewerId] !== peer || peer.softwareEncoder || !deviceHasHardware()) return
+        when {
+            codec.equals("H264", ignoreCase = true) -> if (hardware == true) peer.hardwareConfirmed = true
+            codec.equals("VP8", ignoreCase = true) -> {
+                if (peers.values.count { it.softwareEncoder } < softwareBudget()) {
+                    Log.w(DIAG_TAG, "${peer.viewerId}: hardware encoder unavailable, lite VP8: ${loadLine()}")
+                    peer.softwareEncoder = true
+                    rebalance()
+                } else {
+                    Log.w(DIAG_TAG, "${peer.viewerId}: hardware encoder unavailable, turned away: ${loadLine()}")
+                    peer.rejectBusy()
+                }
+            }
+        }
+    }
+
+    /** After a hardware refusal: find the viewer it hit quickly instead of waiting for the 2 s poll. */
+    private fun pollUnconfirmedSoon() {
+        for (delayMs in longArrayOf(300, 1_000)) {
+            executor.schedule({
+                if (released) return@schedule
+                peers.values.filter { !it.softwareEncoder && !it.hardwareConfirmed }.forEach { peer ->
+                    runCatching { peer.pollStats() }.onFailure { Log.w(TAG, "stats poll failed", it) }
+                }
+            }, delayMs, TimeUnit.MILLISECONDS)
+        }
     }
 
     internal fun onSenderStats(viewerId: String, stats: SenderStats) = listener.onSenderStats(viewerId, stats)
@@ -470,8 +573,17 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 // The device's limit of concurrent hardware encoders: this viewer falls back to VP8 by
                 // itself (libwebrtc encoder switch), everybody else keeps H.264, and later viewers
                 // beyond this number start on VP8 right away (remembered per device).
-                Log.w(TAG, "hardware encoder $codecName failed with others running ($reason) — keeping H.264")
-                EncoderProbe.learnBudget(appContext, codecName, TunedVideoEncoderFactory.getLiveHardwareEncoders())
+                val running = TunedVideoEncoderFactory.getLiveHardwareEncoders()
+                Log.w(TAG, "hardware encoder $codecName failed with $running others running ($reason) — keeping H.264")
+                EncoderProbe.learnBudget(appContext, codecName, running)
+                post {
+                    // 0: the others were released meanwhile, so this says nothing about the limit.
+                    if (running > 0) {
+                        sessionHardwareLimit = running
+                        sessionHardwareLimitUntilMs = SystemClock.elapsedRealtime() + SESSION_LIMIT_MS
+                    }
+                    pollUnconfirmedSoon()
+                }
                 return
             }
             Log.e(TAG, "hardware encoder $codecName failed: $reason — VP8 for new sessions, retry in ${H264_RETRY_S}s")
@@ -495,6 +607,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         private const val TAG = "LocalCast/Engine"
         private const val DIAG_TAG = "LocalCast/Diag"
         private const val H264_RETRY_S = 30L
+
+        /** A refusal may be transient (another app held an encoder): try hardware again after this. */
+        private const val SESSION_LIMIT_MS = 60_000L
 
         /**
          * libwebrtc field trials (names/params verified in the bundled m150 .so):

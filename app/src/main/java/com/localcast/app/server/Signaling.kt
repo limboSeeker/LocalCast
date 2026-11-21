@@ -62,6 +62,12 @@ class Signaling(
         val writer = launch { writeLoop(socket, out) }
         var conn: Conn? = null
         var session: ViewerSession? = null
+        // The viewer is announced to the listener only once the engine actually serves it (its first
+        // message), so a viewer turned away (device at capacity, retrying every few seconds) never
+        // shows up in the app. Guarded by `announce`: join and leave are reported at most once, in order.
+        val announce = Any()
+        var announced = false
+        var gone = false
         try {
             val hello = withTimeoutOrNull(HELLO_TIMEOUT_MS) { readHello(socket) }
             if (hello == null) {
@@ -104,10 +110,22 @@ class Signaling(
             replaced?.out?.close() // old socket is closed by its own writer; its handle() cleans up
 
             out.send(ServerMessage.Welcome(token, viewerId))
-            listener.onViewerJoined(viewerId, remoteIp, hello.userAgent)
 
             session = try {
-                sessions.createViewer(viewerId, remoteIp) { msg -> newConn.out.trySend(msg) }
+                sessions.createViewer(viewerId, remoteIp) { msg ->
+                    if (msg !is ServerMessage.Denied) {
+                        synchronized(announce) {
+                            if (!announced && !gone) {
+                                announced = true
+                                listener.onViewerJoined(viewerId, remoteIp, hello.userAgent)
+                            }
+                        }
+                    }
+                    newConn.out.trySend(msg)
+                    // A session may turn the viewer away later (device at capacity): close the socket
+                    // after the message, as for every other denial.
+                    if (msg is ServerMessage.Denied) newConn.out.close()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -135,7 +153,11 @@ class Signaling(
                 out.close()
                 withTimeoutOrNull(FLUSH_TIMEOUT_MS) { writer.join() }
                 writer.cancel()
-                if (conn != null) {
+                val wasAnnounced = synchronized(announce) {
+                    gone = true
+                    announced
+                }
+                if (conn != null && wasAnnounced) {
                     try {
                         listener.onViewerLeft(conn.viewerId)
                     } catch (e: Exception) {

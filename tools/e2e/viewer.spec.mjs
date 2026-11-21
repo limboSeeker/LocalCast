@@ -120,6 +120,16 @@ test('uk: /mock/stop -> waiting, /mock/start -> playing', async () => {
   assert.deepEqual(errors, []);
 });
 
+test('uk: device at capacity -> waiting, then playing when a slot frees up', async () => {
+  await post('/mock/busy?on=1');
+  const v = await viewer('#pin=123456');
+  await v.waitForFunction(() => window.__localcast.state === 'waiting');
+  assert.match(await v.locator('#sub').innerText(), /стільки глядачам, скільки може/);
+  await post('/mock/busy?on=0');
+  // The page retries 10 s after a busy denial.
+  await v.waitForFunction(() => window.__localcast.state === 'playing' && window.__localcast.stats && window.__localcast.stats.framesDecoded > 10, null, { timeout: 25000 });
+});
+
 test('uk: not streaming yet -> waiting with retry', async () => {
   await post('/mock/stop');
   const v = await viewer('#pin=123456');

@@ -56,7 +56,7 @@ class Sock {
 }
 
 export function startMock(port = 8099) {
-  const st = { streaming: true, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [] };
+  const st = { streaming: true, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [] };
   const log = (...a) => { st.log.push(a.join(' ')); if (process.env.MOCK_DEBUG) console.log(...a); };
 
   const toPhone = (o) => st.phone && st.phone.send(o);
@@ -73,6 +73,7 @@ export function startMock(port = 8099) {
       st.fails = 0;
     }
     if (!st.streaming) return deny(ws, 'not_streaming');
+    if (st.busy) return deny(ws, 'busy');
     if (st.viewer && st.viewer !== ws) { const old = st.viewer; st.viewer = null; old.kill(); }
     st.viewer = ws;
     const token = m.token || crypto.randomBytes(16).toString('hex');
@@ -139,7 +140,8 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       toPhone({ cmd: 'close' }); return j({ ok: true });
     }
     if (req.method === 'POST' && u.pathname === '/mock/start') { st.streaming = true; return j({ ok: true }); }
-    if (req.method === 'POST' && u.pathname === '/mock/reset') { st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.reports = []; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/busy') { st.busy = u.searchParams.get('on') !== '0'; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/reset') { st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.busy = false; st.reports = []; return j({ ok: true }); }
     res.writeHead(404); res.end('not found');
   });
 

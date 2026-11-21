@@ -128,6 +128,9 @@ enum class DenyReason {
     /** Viewer limit reached. */
     @SerialName("full") FULL,
 
+    /** The device is serving as many viewers as its encoders and CPU allow; retry later. */
+    @SerialName("busy") BUSY,
+
     /** Broadcast is not running (server up but no capture). */
     @SerialName("not_streaming") NOT_STREAMING,
 

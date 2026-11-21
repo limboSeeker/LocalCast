@@ -1,6 +1,7 @@
 package com.localcast.app.rtc
 
 import android.util.Log
+import com.localcast.app.server.DenyReason
 import com.localcast.app.server.IceCandidateDto
 import com.localcast.app.server.ServerMessage
 import com.localcast.app.server.ViewerStats
@@ -38,11 +39,20 @@ internal class ViewerPeer(
     private var closed = false
     private var connected = false
 
-    /** Started beyond the hardware encoder budget: VP8 at half resolution (engine thread). */
+    /** This PeerConnection reached CONNECTED at least once (a later DISCONNECTED is transient). */
+    private var everConnected = false
+
+    /** Lite software stream beyond the hardware encoder budget: VP8, reduced size (engine thread). */
     var softwareEncoder = false
+
+    /** Stats showed this viewer on the hardware H.264 encoder (engine thread). */
+    var hardwareConfirmed = false
 
     /** ICE/DTLS connected (engine thread). */
     val isConnected: Boolean get() = connected
+
+    /** Still setting up its first connection: its encoder may not have started yet (engine thread). */
+    val isStarting: Boolean get() = !everConnected
 
     // Outbound bitrate from successive stats samples.
     private var lastBytesSent = -1L
@@ -58,6 +68,8 @@ internal class ViewerPeer(
         disposePeerConnection()
         val gen = ++generation
         remoteDescriptionSet = false
+        hardwareConfirmed = false
+        everConnected = false
         pendingRemoteIce.clear()
 
         val peer = engine.factory.createPeerConnection(engine.rtcConfiguration(), Observer(gen))
@@ -90,26 +102,33 @@ internal class ViewerPeer(
         }, MediaConstraints())
     }
 
-    /** Bitrate, frame rate and degradation preference from the current capture settings. */
+    /**
+     * Bitrate, frame rate, size and degradation preference from the current capture settings and
+     * this viewer's share of the Wi-Fi. Called again whenever viewers join or leave.
+     */
     fun applySendParameters() {
         val peer = pc ?: return
         val s = sender ?: return
         val p = engine.sendProfile
+        val share = engine.shares
         try {
             val params = s.parameters
             params.degradationPreference = p.degradation
-            val maxBps = if (softwareEncoder) minOf(p.maxBitrateBps, SOFTWARE_MAX_BPS) else p.maxBitrateBps
+            val maxBps = if (softwareEncoder) share.liteBps else share.fullBps
             params.encodings.forEach { e ->
                 e.maxBitrateBps = maxBps
                 e.minBitrateBps = CaptureFormat.MIN_BITRATE_BPS
-                e.maxFramerate = p.fps
                 // Software VP8 at full size would eat the CPU the capture pipeline needs.
-                e.scaleResolutionDownBy = if (softwareEncoder) 2.0 else 1.0
+                e.maxFramerate = if (softwareEncoder) p.liteFps else p.fps
+                e.scaleResolutionDownBy = if (softwareEncoder) p.liteScale else 1.0
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
             }
             if (!s.setParameters(params)) Log.w(TAG, "$viewerId: setParameters rejected")
-            peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, minOf(p.startBitrateBps, maxBps), maxBps)
+            // A start bitrate resets the bandwidth estimate, so it is only given before the first
+            // connection (not after a transient DISCONNECTED).
+            val start = if (everConnected) null else engine.startBitrateFor(this, maxBps)
+            peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, start, maxBps)
         } catch (e: RuntimeException) {
             Log.w(TAG, "$viewerId: applySendParameters failed", e)
         }
@@ -222,6 +241,13 @@ internal class ViewerPeer(
 
     override fun close() = engine.post { closeNow() }
 
+    /** Engine thread only. The device cannot serve another viewer: say so and close. */
+    fun rejectBusy() {
+        if (closed) return
+        send(ServerMessage.Denied(DenyReason.BUSY))
+        closeNow()
+    }
+
     /** Engine thread only. */
     fun closeNow() {
         if (closed) return
@@ -302,6 +328,8 @@ internal class ViewerPeer(
                 sendDelayMs = sendDelayMs,
             ),
         )
+        // Last: this may turn the viewer away (closes the peer).
+        engine.onPeerEncoder(this, codec, hardware)
     }
 
     private fun disposePeerConnection() {
@@ -333,6 +361,7 @@ internal class ViewerPeer(
                 if (gen != generation || closed) return@post
                 Log.i(TAG, "$viewerId ($remoteAddress): $newState")
                 val nowConnected = newState == PeerConnection.PeerConnectionState.CONNECTED
+                if (nowConnected) everConnected = true
                 if (nowConnected != connected) {
                     connected = nowConnected
                     engine.onPeerConnectionState(viewerId, nowConnected)
@@ -371,7 +400,6 @@ internal class ViewerPeer(
     private companion object {
         const val TAG = "LocalCast/Peer"
         const val DIAG_TAG = "LocalCast/Diag"
-        const val SOFTWARE_MAX_BPS = 2_500_000
         const val STREAM_ID = "localcast"
     }
 }

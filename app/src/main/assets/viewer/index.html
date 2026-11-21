@@ -110,6 +110,7 @@ var I18N = {
     connecting: 'Підключення…', reconnecting: 'Перепідключення…', paused: 'Трансляцію призупинено',
     stopped: 'Трансляцію зупинено на телефоні. Очікування…', notStreaming: 'Трансляцію ще не запущено. Очікування…',
     full: 'Досягнуто ліміту глядачів', error: 'Помилка підключення. Повторюємо…',
+    busy: 'Телефон уже транслює стільки глядачам, скільки може. Спробуємо ще раз за кілька секунд…',
     na: 'н/д', ms: 'мс', mbps: 'Мбіт/с', estimate: 'оцінка', hw: 'апаратний', sw: 'програмний',
     sLatency: 'Затримка', sFps: 'FPS', sSize: 'Розмір', sBitrate: 'Бітрейт', sCodec: 'Кодек', sEncoder: 'Енкодер',
     sEncode: 'Кодування', sJitter: 'Джитер-буфер', sDecode: 'Декодування', sRtt: 'RTT', sDropped: 'Пропущено',
@@ -124,6 +125,7 @@ var I18N = {
     connecting: 'Connecting…', reconnecting: 'Reconnecting…', paused: 'Casting paused',
     stopped: 'Casting stopped on the phone. Waiting…', notStreaming: 'Casting hasn\'t started yet. Waiting…',
     full: 'Viewer limit reached', error: 'Connection error. Retrying…',
+    busy: 'The phone is already streaming to as many viewers as it can. Trying again in a few seconds…',
     na: 'n/a', ms: 'ms', mbps: 'Mbps', estimate: 'estimate', hw: 'hardware', sw: 'software',
     sLatency: 'Latency', sFps: 'FPS', sSize: 'Resolution', sBitrate: 'Bitrate', sCodec: 'Codec', sEncoder: 'Encoder',
     sEncode: 'Encode time', sJitter: 'Jitter buffer', sDecode: 'Decode time', sRtt: 'RTT', sDropped: 'Dropped',
@@ -316,6 +318,11 @@ function onDenied(m) {
       setState('denied');
       showCard({ title: 'LocalCast', sub: tr('full'), spin: true });
       later(5000, connect);
+      break;
+    case 'busy':
+      setState('waiting');
+      showCard({ title: 'LocalCast', sub: tr('busy'), spin: true });
+      later(10000, connect);
       break;
     case 'not_streaming':
       setState('waiting');

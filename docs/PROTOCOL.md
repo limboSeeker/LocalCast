@@ -36,6 +36,7 @@ Phone → browser:
 {"type":"denied","reason":"locked","retryAfterSec":60} // too many attempts from this IP
 {"type":"denied","reason":"token"}                    // token unknown/expired → show the PIN form
 {"type":"denied","reason":"full"}                     // viewer limit (no limit by default)
+{"type":"denied","reason":"busy"}                     // device at capacity (encoders/CPU) → retry in ~10 s
 {"type":"denied","reason":"not_streaming"}            // server is up, not casting → wait and retry
 {"type":"denied","reason":"bad_request"}
 {"type":"offer","sdp":"v=0..."}

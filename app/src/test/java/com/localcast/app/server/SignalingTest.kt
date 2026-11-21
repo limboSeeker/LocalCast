@@ -114,6 +114,21 @@ class SignalingTest {
         }
     }
 
+    @Test fun laterDenialFromSessionClosesTheSocket() = run { client, signaling, guard, factory, events ->
+        client.webSocket("/ws") {
+            sendC(ClientMessage.Hello(pin = guard.pin))
+            recv() as ServerMessage.Welcome
+            assertEquals(ServerMessage.Offer("offer-v1"), recv())
+            // The engine turns the viewer away after admission (device at capacity).
+            factory.created.single().send(ServerMessage.Denied(DenyReason.BUSY))
+            assertEquals(ServerMessage.Denied(DenyReason.BUSY), recv())
+            assertTrue(withTimeout(5_000) { incoming.receiveCatching() }.isClosed)
+        }
+        waitFor { events.log.contains("left:v1") }
+        assertTrue(factory.created.single().closed)
+        assertEquals(0, signaling.viewerCount)
+    }
+
     @Test fun badFirstMessage() = run { client, _, _, _, _ ->
         client.webSocket("/ws") {
             sendC(ClientMessage.Bye)
