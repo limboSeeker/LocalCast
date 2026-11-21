@@ -41,11 +41,22 @@
 ```bash
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
-Результат:
-- `app/build/outputs/apk/debug/app-debug.apk`
-- `app/build/outputs/apk/release/app-release.apk` — R8; для перевірки підписаний debug-ключем.
+Результат — окремий APK на кожну архітектуру (універсальний APK не збирається):
 
-Обидва APK вирівняні під 16 KB (Android 15+).
+| Release APK (`app/build/outputs/apk/release/`) | Для чого | Розмір |
+|---|---|---|
+| `app-arm64-v8a-release.apk` | сучасні телефони й планшети | ~8,4 МБ |
+| `app-armeabi-v7a-release.apk` | старі 32-бітні пристрої | ~6,7 МБ |
+| `app-x86_64-release.apk` | емулятор x86_64 | ~9,4 МБ |
+
+Release зібраний R8 і для перевірки підписаний debug-ключем. Debug APK (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) — без R8, ~45 МБ.
+
+Нативні бібліотеки (`.so`) лежать в APK стиснутими й розпаковуються під час встановлення. У 64-бітних APK їхні ELF-сегменти вирівняні на 16 KB (Android 15+).
+
+### CI
+GitHub Actions (`.github/workflows/android.yml`) на push у `main` і на кожен pull request:
+- `build`: `./gradlew testDebugUnitTest lintDebug assembleRelease`; артефакти — release APK arm64-v8a і armeabi-v7a та звіт lint;
+- `viewer-e2e`: тести сторінки перегляду з `tools/e2e` (мок-сервер + Playwright Chromium).
 
 ## Тести
 - **Юніт-тести** (`./gradlew testDebugUnitTest`): PIN і блокування, протокол, сигналізація (Ktor test host), вибір мережевих адрес, розрахунок розміру/FPS/бітрейту.

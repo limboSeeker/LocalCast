@@ -44,11 +44,12 @@ android {
 
     splits {
         abi {
-            // Small per-architecture APKs (phones need only arm64-v8a) plus one universal APK.
+            // One APK per architecture: arm64-v8a and armeabi-v7a for phones and tablets,
+            // x86_64 for the emulator. No universal APK: it carries all three libwebrtc builds.
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
+            isUniversalApk = false
         }
     }
 
@@ -59,11 +60,22 @@ android {
                 "/META-INF/INDEX.LIST",
                 "/META-INF/DEPENDENCIES",
                 "/META-INF/io.netty.versions.properties",
+                // Read only by kotlin-reflect, which is excluded below.
+                "/kotlin/**.kotlin_builtins",
+                // License texts and library version markers: not used at runtime.
+                "/META-INF/LICENSE*",
+                "/META-INF/**/LICENSE*",
+                "/META-INF/*.version",
+                // kotlinx-coroutines debug agent (JVM only).
+                "/DebugProbesKt.bin",
             )
         }
         jniLibs {
-            // Keep .so files uncompressed and page-aligned (16 KB page devices).
-            useLegacyPackaging = false
+            // Compress .so files: the APK is sideloaded, so its size is what users download and
+            // share, and libwebrtc (arm64) shrinks from ~12 MB to ~6 MB. The installer extracts
+            // the libraries to disk, so in-APK page alignment is not needed; 16 KB page devices
+            // only need the ELF LOAD segments aligned to 16 KB, which all 64-bit .so here are.
+            useLegacyPackaging = true
         }
     }
 
@@ -90,9 +102,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
-    implementation(libs.ktor.server.websockets)
+    implementation(libs.ktor.server.core) { withoutReflectAndHocon() }
+    implementation(libs.ktor.server.cio) { withoutReflectAndHocon() }
+    implementation(libs.ktor.server.websockets) { withoutReflectAndHocon() }
     implementation(libs.slf4j.nop)
 
     implementation(libs.webrtc.android)
@@ -100,6 +112,16 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.ktor.server.test.host)
+    // Same exclusions in tests, so SignalingTest runs Ktor exactly as the app ships it.
+    testImplementation(libs.ktor.server.test.host) { withoutReflectAndHocon() }
     testImplementation(libs.ktor.client.websockets)
+}
+
+// ktor-server-core depends on kotlin-reflect (~835 KB of dex) and Typesafe Config (~67 KB).
+// Ktor needs them only to load modules by name and to read HOCON application.conf (EngineMain).
+// LocalCast starts the server with embeddedServer { } and the default in-memory config,
+// so neither is used. R8 -dontwarn rules for the remaining references: proguard-rules.pro.
+fun ExternalModuleDependency.withoutReflectAndHocon() {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
+    exclude(group = "com.typesafe", module = "config")
 }
