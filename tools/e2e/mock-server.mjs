@@ -56,10 +56,12 @@ class Sock {
 }
 
 export function startMock(port = 8099) {
-  const st = { streaming: true, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [] };
+  const st = { streaming: true, paused: false, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [] };
   const log = (...a) => { st.log.push(a.join(' ')); if (process.env.MOCK_DEBUG) console.log(...a); };
 
   const toPhone = (o) => st.phone && st.phone.send(o);
+  // Like the app: a paused cast keeps the PeerConnection (the app sends black frames) and says streaming:false.
+  const stateMsg = () => ({ type: 'state', streaming: !st.paused, width: 640, height: 360, fps: 60 });
   const deny = (ws, reason, extra = {}) => { ws.send({ type: 'denied', reason, ...extra }); ws.close(); };
 
   function viewerHello(ws, m) {
@@ -79,7 +81,7 @@ export function startMock(port = 8099) {
     const token = m.token || crypto.randomBytes(16).toString('hex');
     st.tokens.add(token);
     ws.send({ type: 'welcome', token, viewerId: 'v1', protocol: 1 });
-    ws.send({ type: 'state', streaming: true, width: 640, height: 360, fps: 60 });
+    ws.send(stateMsg());
     toPhone({ cmd: 'newViewer' });
   }
 
@@ -101,7 +103,8 @@ export function startMock(port = 8099) {
 <body style="margin:0;background:#222;color:#fff;font:14px monospace"><canvas id=c width=640 height=360></canvas><div id=s>init</div>
 <script>
 const c=document.getElementById('c'),x=c.getContext('2d'),s=document.getElementById('s');
-function draw(){const t=performance.now();x.fillStyle='#103060';x.fillRect(0,0,640,360);
+let paused=false;
+function draw(){if(paused)return;const t=performance.now();x.fillStyle='#103060';x.fillRect(0,0,640,360);
  x.fillStyle='#fff';x.font='bold 64px monospace';const d=new Date();
  x.fillText(d.toTimeString().slice(0,8)+'.'+String(d.getMilliseconds()).padStart(3,'0'),40,120);
  x.fillStyle='#ffb020';x.fillRect((t/4)%600,200,40,40);x.fillStyle='#4f8cff';x.beginPath();x.arc(320+Math.cos(t/300)*120,300+Math.sin(t/300)*40,20,0,7);x.fill();}
@@ -119,6 +122,7 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
  else if(m.cmd==='answer'&&pc&&pc.signalingState==='have-local-offer') await pc.setRemoteDescription({type:'answer',sdp:m.sdp});
  else if(m.cmd==='ice'&&pc&&pc.remoteDescription) pc.addIceCandidate(m.candidate).catch(()=>{});
  else if(m.cmd==='close'&&pc){pc.close();pc=null;}
+ else if(m.cmd==='pause'){paused=m.on;if(paused){x.fillStyle='#000';x.fillRect(0,0,640,360);}}
 };
 </script>`;
 
@@ -140,8 +144,15 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       toPhone({ cmd: 'close' }); return j({ ok: true });
     }
     if (req.method === 'POST' && u.pathname === '/mock/start') { st.streaming = true; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/pause') {
+      st.paused = u.searchParams.get('on') !== '0';
+      // The mock phone paints one black frame and then sends nothing (worst case of the app's low-rate black frames).
+      toPhone({ cmd: 'pause', on: st.paused });
+      if (st.viewer) st.viewer.send(stateMsg());
+      return j({ ok: true });
+    }
     if (req.method === 'POST' && u.pathname === '/mock/busy') { st.busy = u.searchParams.get('on') !== '0'; return j({ ok: true }); }
-    if (req.method === 'POST' && u.pathname === '/mock/reset') { st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.busy = false; st.reports = []; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/reset') { if (st.paused) toPhone({ cmd: 'pause', on: false }); st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.paused = false; st.busy = false; st.reports = []; return j({ ok: true }); }
     res.writeHead(404); res.end('not found');
   });
 
