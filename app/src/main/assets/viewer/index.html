@@ -134,6 +134,9 @@ var keep = (function () {
 var CATCHUP = { jb: qnum('catchup_jb', 400), lat: qnum('catchup_lat', 800), n: 5, cooldown: qnum('catchup_ms', 60000) };
 var CATCHUP_COOLDOWN_MS = CATCHUP.cooldown;
 var catchHist = [], lastCatchUp = 0, catchUps = 0;
+// A catch-up that did not help (the next one is due soon after: the link itself is the problem,
+// a restart cannot fix it) doubles the pause before the next one, up to 8x.
+var catchCooldown = CATCHUP.cooldown;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
 
@@ -636,7 +639,10 @@ function catchUpSample(s) {
   catchHist.push(s);
   if (catchHist.length > CATCHUP.n) catchHist.shift();
   var now = Date.now();
-  if (!shouldCatchUp(catchHist, now, lastCatchUp, CATCHUP)) return;
+  var cfg = { jb: CATCHUP.jb, lat: CATCHUP.lat, n: CATCHUP.n, cooldown: catchCooldown };
+  if (!shouldCatchUp(catchHist, now, lastCatchUp, cfg)) return;
+  catchCooldown = lastCatchUp && now - lastCatchUp < catchCooldown * 3
+    ? Math.min(catchCooldown * 2, CATCHUP.cooldown * 8) : CATCHUP.cooldown;
   var r = function (x) { return x === null || x === undefined ? 'n/a' : Math.round(x); };
   console.info('LocalCast catch-up: ' + catchHist.length + ' polls over the limit (jitter buffer ' +
     catchHist.map(function (x) { return r(x.jitterBufferMs); }).join('/') + ' ms > ' + CATCHUP.jb + ', latency ' +
@@ -801,6 +807,7 @@ window.__localcast = {
   CATCHUP_COOLDOWN_MS: CATCHUP_COOLDOWN_MS,
   get keep() { return keep; },
   get catchUps() { return catchUps; },
+  get catchCooldown() { return catchCooldown; },
   get catchUpRun() { return catchHist.length; },
   shouldCatchUp: shouldCatchUp,
   // Tests: feed a stats sample ({jitterBufferMs, latencyMs, latencyEstimated}) into the same catch-up path as poll().

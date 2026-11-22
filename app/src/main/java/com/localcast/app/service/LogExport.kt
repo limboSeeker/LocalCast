@@ -24,6 +24,7 @@ object LogExport {
     const val MAX_LOG_BYTES = 2 * 1024 * 1024
     const val KEEP_FILES = 3
     private const val LOGCAT_TIMEOUT_S = 10L
+    private const val EXIT_REASONS = 5
 
     fun authority(): String = "${BuildConfig.APPLICATION_ID}.logs"
 
@@ -89,26 +90,61 @@ object LogExport {
         }
         file.outputStream().buffered().use { out ->
             out.write(header(diagnostics, version, now).toByteArray())
+            out.write(exitReasons(context).toByteArray())
             out.write(logcat())
         }
         pruneOld(dir, KEEP_FILES)
         return file
     }
 
-    private fun logcat(): ByteArray = try {
-        val p = ProcessBuilder("logcat", "-d", "-v", "threadtime", "--pid=${Process.myPid()}")
-            .redirectErrorStream(true)
-            .start()
-        val (tail, dropped) = p.inputStream.use { readTail(it, MAX_LOG_BYTES) }
-        if (!p.waitFor(LOGCAT_TIMEOUT_S, TimeUnit.SECONDS)) p.destroy()
-        val note = when {
-            tail.isEmpty() -> "[logcat returned nothing]\n"
-            dropped > 0 -> "[older lines trimmed: $dropped bytes]\n"
-            else -> ""
+    private fun logcat(): ByteArray {
+        var p: java.lang.Process? = null
+        // A logcat that never reaches EOF would hang the read: kill it after the timeout, the
+        // read then ends and the file keeps what came so far.
+        val watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+        return try {
+            val proc = ProcessBuilder("logcat", "-d", "-v", "threadtime", "--pid=${Process.myPid()}")
+                .redirectErrorStream(true)
+                .start()
+            p = proc
+            watchdog.schedule({ proc.destroyForcibly() }, LOGCAT_TIMEOUT_S, TimeUnit.SECONDS)
+            val (tail, dropped) = proc.inputStream.use { readTail(it, MAX_LOG_BYTES) }
+            val note = when {
+                tail.isEmpty() -> "[logcat returned nothing]\n"
+                dropped > 0 -> "[older lines trimmed: $dropped bytes]\n"
+                else -> ""
+            }
+            note.toByteArray() + tail
+        } catch (e: Exception) {
+            "[logcat failed: ${e.javaClass.simpleName}: ${e.message}]\n".toByteArray()
+        } finally {
+            watchdog.shutdownNow()
+            p?.destroyForcibly()
         }
-        note.toByteArray() + tail
+    }
+
+    /**
+     * Why earlier runs of the app ended (crash, ANR, killed for memory, user stop...): the log of
+     * the current process does not contain lines of a process that crashed.
+     */
+    private fun exitReasons(context: Context): String = try {
+        val am = context.getSystemService(android.app.ActivityManager::class.java)
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val reasons = am.getHistoricalProcessExitReasons(context.packageName, 0, EXIT_REASONS)
+        buildString {
+            append("== Previous exits ==\n")
+            if (reasons.isEmpty()) append("(none recorded)\n")
+            reasons.forEach { r ->
+                append(fmt.format(Date(r.timestamp))).append(" reason=").append(r.reason)
+                    .append(" status=").append(r.status).append(" importance=").append(r.importance)
+                    .append(" pss=").append(r.pss).append("KB")
+                r.description?.let { append(" ").append(it) }
+                append('\n')
+            }
+            append('\n')
+        }
     } catch (e: Exception) {
-        "[logcat failed: ${e.javaClass.simpleName}: ${e.message}]\n".toByteArray()
+        "== Previous exits ==\n(unavailable: ${e.javaClass.simpleName})\n\n"
     }
 
     /** ACTION_SEND chooser for [file], with read access granted to the receiving app. */

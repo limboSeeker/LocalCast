@@ -13,6 +13,9 @@ final class KeyFrameThrottle {
   private boolean anyKeyFrame;
   private boolean pending;
   private long lastKeyFrameNs;
+  // State before the last granted keyframe, restored when the encoder drops that frame.
+  private boolean prevAnyKeyFrame;
+  private long prevLastKeyFrameNs;
 
   /**
    * @param requested the frame was asked to be a keyframe
@@ -27,10 +30,22 @@ final class KeyFrameThrottle {
       pending = true;
       return false;
     }
+    prevAnyKeyFrame = anyKeyFrame;
+    prevLastKeyFrameNs = lastKeyFrameNs;
     anyKeyFrame = true;
     pending = false;
     lastKeyFrameNs = nowNs;
     return true;
+  }
+
+  /**
+   * The encoder did not take the frame granted as a keyframe (e.g. its queue was full): the request
+   * stays pending and the next frame may be the keyframe.
+   */
+  void rejected() {
+    anyKeyFrame = prevAnyKeyFrame;
+    lastKeyFrameNs = prevLastKeyFrameNs;
+    pending = true;
   }
 
   /** A (re)initialised encoder starts with a keyframe of its own: let the next request through. */

@@ -254,7 +254,11 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
       if (requested != key) {
         info = key ? KEY_ONLY : DELTA_ONLY;
       }
-      return delegate.encode(frame, info);
+      VideoCodecStatus status = delegate.encode(frame, info);
+      if (key && status != VideoCodecStatus.OK) {
+        keyFrames.rejected();
+      }
+      return status;
     }
 
     private static final EncodeInfo DELTA_ONLY =

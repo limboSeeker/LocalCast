@@ -1,6 +1,7 @@
 package com.localcast.app.server
 
 import android.content.res.AssetManager
+import android.os.SystemClock
 import android.util.Log
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -39,14 +40,17 @@ class HttpServer(
 ) {
     private val lock = Any()
     private var engine: EmbeddedServer<*, *>? = null
+    private var boundPort = 0
 
     /** Binds the first free port in `preferredPort until preferredPort + attempts`; returns it. */
     fun start(preferredPort: Int, attempts: Int = 10): Int = synchronized(lock) {
         check(engine == null) { "already started" }
         var last: Throwable? = null
-        // Viewers keep the address (and the QR they scanned): after a quick stop/start the old
-        // server may still be closing, so wait for the preferred port before moving on.
-        val first = waitForPort(preferredPort, PREFERRED_PORT_WAIT_MS, ::isPortFree)
+        // Viewers keep the address (and the QR they scanned): right after our own server on this
+        // port stopped it may still be closing, so wait for it. A port held by another app is not
+        // waited for.
+        val waitMs = if (recentlyStopped(preferredPort)) PREFERRED_PORT_WAIT_MS else 0L
+        val first = waitForPort(preferredPort, waitMs, ::isPortFree)
         for (port in preferredPort until preferredPort + attempts) {
             // Ktor CIO binds asynchronously: a busy port surfaces as a BindException in a background
             // coroutine (which crashed the app) instead of from start(). Probe it first.
@@ -58,6 +62,7 @@ class HttpServer(
             try {
                 candidate.start(wait = false)
                 engine = candidate
+                boundPort = port
                 Log.i(TAG, "listening on :$port")
                 return port
             } catch (t: Throwable) {
@@ -91,6 +96,7 @@ class HttpServer(
         } catch (t: Throwable) {
             Log.w(TAG, "stop failed", t)
         }
+        lastStop = boundPort to SystemClock.elapsedRealtime()
     }
 
     private fun createEngine(port: Int) = embeddedServer(
@@ -174,6 +180,14 @@ class HttpServer(
 }
 
 internal const val PREFERRED_PORT_WAIT_MS = 3_000L
+
+/** Port and time (elapsedRealtime) at which the last server of this process stopped. */
+@Volatile private var lastStop: Pair<Int, Long> = 0 to Long.MIN_VALUE / 2
+
+private const val RECENT_STOP_MS = 10_000L
+
+private fun recentlyStopped(port: Int): Boolean =
+    lastStop.first == port && SystemClock.elapsedRealtime() - lastStop.second < RECENT_STOP_MS
 internal const val PORT_POLL_MS = 200L
 
 /** True once [isFree] reports [port] free, polling for up to [waitMs]. */

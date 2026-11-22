@@ -13,14 +13,18 @@ import kotlin.math.roundToInt
  * back. A forced estimate floor was tried and made it worse (the link really carried ~2.7 Mbit/s).
  *
  * The capture is shared by all viewers and never restarted: a step only changes this viewer's
- * `maxFramerate` and `scaleResolutionDownBy`.
+ * `maxFramerate` and `scaleResolutionDownBy`. A new size resets the hardware encoder (a keyframe),
+ * so steps are held for a while and a step up that did not last makes the next hold longer.
  */
 object QualityLadder {
 
     /** One step: the capture scaled down by [scale] at [fps] frames per second. */
     data class Rung(val scale: Double, val fps: Int) {
+        /** Short side of a [width]x[height] capture at this step. */
+        fun shortSide(width: Int, height: Int): Int = (min(width, height) / scale).roundToInt()
+
         /** e.g. "720p30" for a [width]x[height] capture. */
-        fun label(width: Int, height: Int): String = "${(min(width, height) / scale).roundToInt()}p$fps"
+        fun label(width: Int, height: Int): String = "${shortSide(width, height)}p$fps"
     }
 
     /** Bits per pixel per frame that keep scrolling text readable in H.264 screen content. */
@@ -35,7 +39,18 @@ object QualityLadder {
     const val RISE_POLLS = 2
 
     /**
-     * Steps from best to worst for a [width]x[height] capture at [fps].
+     * A target this close to the viewer's own bitrate cap is limited by the cap (a manual bitrate,
+     * its share of the Wi-Fi), not by the link: that never steps down.
+     */
+    const val CAP_LIMITED_SHARE = 0.85
+
+    /** No step up sooner than this after any change; doubled (up to [MAX_HOLD_MS]) when a rise fails. */
+    const val MIN_HOLD_MS = 15_000L
+    const val MAX_HOLD_MS = 120_000L
+
+    /**
+     * Steps from best to worst for a [width]x[height] capture at [fps]. Frame-rate steps come
+     * before size steps where possible: they need no encoder reset.
      * Sharpness first (the user's order): full size at fps → full size at 30 → 720p 30 → 720p 15 → 720p 10.
      * Smoothness first: full size → 540p at fps → 540p 30 → 540p 15.
      */
@@ -57,23 +72,77 @@ object QualityLadder {
     fun needBps(rung: Rung, width: Int, height: Int): Double =
         (width / rung.scale) * (height / rung.scale) * rung.fps * BITS_PER_PIXEL
 
-    /** Current step and the polls so far that would allow a step up. */
-    data class State(val index: Int = 0, val riseVotes: Int = 0)
+    /**
+     * Current step, the polls so far that would allow a step up, when the step last changed and
+     * how long to hold it before rising.
+     */
+    data class State(
+        val index: Int = 0,
+        val riseVotes: Int = 0,
+        val changedAtMs: Long = Long.MIN_VALUE / 2,
+        val holdMs: Long = MIN_HOLD_MS,
+    )
 
     /**
-     * Next state for the encoder's [targetBps]: straight down to the best step that fits, up one
-     * step only when the target exceeds that step's budget by [RISE_MARGIN] for [RISE_POLLS] polls,
-     * so a sawing estimate does not swing between steps.
+     * Next state for the encoder's [targetBps] at [nowMs]; [capBps] is the viewer's own bitrate cap.
+     * Down at once to the best step that fits (a step fits when its budget is covered, or when the
+     * target sits at the cap: then the link is not the limit). Up one step only after the hold
+     * time, when the target exceeds that step's budget by [RISE_MARGIN] for [RISE_POLLS] polls.
+     * Falling again within the hold after a rise doubles the next hold.
      */
-    fun next(rungs: List<Rung>, width: Int, height: Int, state: State, targetBps: Int): State {
+    fun next(
+        rungs: List<Rung>,
+        width: Int,
+        height: Int,
+        state: State,
+        targetBps: Int,
+        capBps: Int,
+        nowMs: Long,
+    ): State {
         if (rungs.isEmpty()) return State()
         val current = state.index.coerceIn(0, rungs.lastIndex)
-        val fit = rungs.indices.firstOrNull { needBps(rungs[it], width, height) <= targetBps } ?: rungs.lastIndex
-        if (fit > current) return State(fit, 0)
-        if (current > 0 && targetBps >= needBps(rungs[current - 1], width, height) * RISE_MARGIN) {
-            val votes = state.riseVotes + 1
-            return if (votes >= RISE_POLLS) State(current - 1, 0) else State(current, votes)
+        val capLimited = targetBps >= capBps * CAP_LIMITED_SHARE
+        fun fits(i: Int) = capLimited || needBps(rungs[i], width, height) <= targetBps
+        val fit = rungs.indices.firstOrNull { fits(it) } ?: rungs.lastIndex
+        if (fit > current) {
+            // A rise that did not hold: wait longer before the next one.
+            val failedRise = nowMs - state.changedAtMs < state.holdMs && state.riseVotes == -1
+            val hold = if (failedRise) min(state.holdMs * 2, MAX_HOLD_MS) else state.holdMs
+            return State(fit, 0, nowMs, hold)
         }
-        return State(current, 0)
+        if (current == 0) return state.copy(index = 0, riseVotes = 0)
+        if (nowMs - state.changedAtMs < state.holdMs) return state.copy(index = current, riseVotes = votesAfterRise(state))
+        val upper = needBps(rungs[current - 1], width, height)
+        if (capLimited || targetBps >= upper * RISE_MARGIN) {
+            val votes = max(0, state.riseVotes) + 1
+            // riseVotes = -1 marks "just rose": a fall within the hold counts as a failed rise.
+            return if (votes >= RISE_POLLS) State(current - 1, -1, nowMs, state.holdMs) else state.copy(index = current, riseVotes = votes)
+        }
+        // Held steady through a whole hold: forget past failures.
+        return state.copy(index = current, riseVotes = 0, holdMs = MIN_HOLD_MS)
+    }
+
+    private fun votesAfterRise(state: State) = if (state.riseVotes == -1) -1 else 0
+
+    /**
+     * Index in [newRungs] for a viewer that was on [oldIndex] of [oldRungs] when the capture size
+     * or frame rate changed (thermal limits): the best new step no better than the old one in size
+     * and frame rate, so a change never silently raises or lowers the quality.
+     */
+    fun remap(
+        oldRungs: List<Rung>,
+        oldWidth: Int,
+        oldHeight: Int,
+        oldIndex: Int,
+        newRungs: List<Rung>,
+        newWidth: Int,
+        newHeight: Int,
+    ): Int {
+        if (oldIndex <= 0 || oldRungs.isEmpty() || newRungs.isEmpty()) return 0
+        val old = oldRungs[oldIndex.coerceIn(0, oldRungs.lastIndex)]
+        val side = old.shortSide(oldWidth, oldHeight)
+        return newRungs.indices.firstOrNull {
+            newRungs[it].shortSide(newWidth, newHeight) <= side && newRungs[it].fps <= old.fps
+        } ?: newRungs.lastIndex
     }
 }

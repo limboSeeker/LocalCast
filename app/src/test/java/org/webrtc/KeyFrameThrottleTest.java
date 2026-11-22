@@ -49,4 +49,14 @@ public class KeyFrameThrottleTest {
     assertTrue(t.shouldEncodeKeyFrame(true, 0, 0));
     assertTrue(t.shouldEncodeKeyFrame(true, 1, 0));
   }
+
+  @Test
+  public void aKeyFrameTheEncoderDroppedIsRetriedOnTheNextFrame() {
+    KeyFrameThrottle t = new KeyFrameThrottle();
+    assertTrue(t.shouldEncodeKeyFrame(true, 0, 1000));
+    assertTrue(t.shouldEncodeKeyFrame(true, 2000 * MS, 1000));
+    t.rejected(); // queue full: the frame was dropped
+    // Not throttled by the dropped attempt, and remembered without a new request.
+    assertTrue(t.shouldEncodeKeyFrame(false, 2010 * MS, 1000));
+  }
 }

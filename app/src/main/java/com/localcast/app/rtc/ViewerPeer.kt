@@ -51,15 +51,34 @@ internal class ViewerPeer(
     var hardwareConfirmed = false
 
     /** Step on the [QualityLadder] chosen from the encoder's target: 0 = full quality (engine thread). */
+    // Kept across renegotiations: a reconnect over the same narrow link must not start at full
+    // quality again (it would flood the link and trigger the next reconnect).
     private var ladder = QualityLadder.State()
 
-    /** Steps for this viewer, or null when it does not adapt (lite stream, switched off, no capture yet). */
+    /** Steps the [ladder] index refers to, with the capture they were made for. */
+    private var ladderFor: Triple<CaptureSize, List<QualityLadder.Rung>, Boolean>? = null
+
+    /** Stats polls since the PeerConnection connected: the estimate is still ramping up meanwhile. */
+    private var pollsSinceConnect = 0
+
+    /**
+     * Steps for this viewer, or null when it does not adapt (lite stream, switched off, no capture
+     * yet). When the capture changes (thermal limits) the current step is carried over to the
+     * closest step that is no better, so the quality never jumps either way.
+     */
     private fun ladderRungs(): List<QualityLadder.Rung>? {
         if (softwareEncoder || !engine.qualityLadder) return null
         val size = engine.captureSize ?: return null
         val p = engine.sendProfile
         val sharp = p.degradation == RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
-        return QualityLadder.rungs(size.width, size.height, p.fps, sharp)
+        val rungs = QualityLadder.rungs(size.width, size.height, p.fps, sharp)
+        val old = ladderFor
+        if (old != null && (old.first != size || old.second != rungs || old.third != sharp)) {
+            val index = QualityLadder.remap(old.second, old.first.width, old.first.height, ladder.index, rungs, size.width, size.height)
+            ladder = ladder.copy(index = index, riseVotes = 0)
+        }
+        ladderFor = Triple(size, rungs, sharp)
+        return rungs
     }
 
     private fun currentRung(): QualityLadder.Rung? =
@@ -90,7 +109,8 @@ internal class ViewerPeer(
         remoteDescriptionSet = false
         hardwareConfirmed = false
         everConnected = false
-        ladder = QualityLadder.State()
+        pollsSinceConnect = 0
+        lastApplied = null
         pendingRemoteIce.clear()
 
         val peer = engine.factory.createPeerConnection(engine.rtcConfiguration(), Observer(gen))
@@ -127,6 +147,17 @@ internal class ViewerPeer(
      * Bitrate, frame rate, size and degradation preference from the current capture settings and
      * this viewer's share of the Wi-Fi. Called again whenever viewers join or leave.
      */
+    private data class Applied(
+        val generation: Int,
+        val negotiated: Boolean,
+        val maxBps: Int,
+        val fps: Int,
+        val scale: Double,
+        val degradation: RtpParameters.DegradationPreference,
+    )
+
+    private var lastApplied: Applied? = null
+
     fun applySendParameters() {
         val peer = pc ?: return
         val s = sender ?: return
@@ -139,19 +170,36 @@ internal class ViewerPeer(
             // Software VP8 at full size would eat the CPU the capture pipeline needs.
             val profileFps = if (softwareEncoder) p.liteFps else p.fps
             val rung = currentRung()
+            val fps = rung?.fps?.coerceAtMost(profileFps) ?: profileFps
+            val scale = if (softwareEncoder) p.liteScale else rung?.scale ?: 1.0
+            // A start bitrate resets the bandwidth estimate, so it is only given before the first
+            // connection (not after a transient DISCONNECTED); on a lower step, no higher than it needs.
+            val start = if (everConnected) {
+                null
+            } else {
+                val wanted = engine.startBitrateFor(this, maxBps)
+                val size = engine.captureSize
+                if (rung != null && ladder.index > 0 && size != null) {
+                    minOf(wanted, QualityLadder.needBps(rung, size.width, size.height).toInt())
+                        .coerceAtLeast(CaptureFormat.MIN_BITRATE_BPS)
+                } else {
+                    wanted
+                }
+            }
+            // Repeating identical parameters is skipped (rebalance calls this for every viewer).
+            val applied = Applied(generation, remoteDescriptionSet, maxBps, fps, scale, p.degradation)
+            if (start == null && applied == lastApplied) return
             params.encodings.forEach { e ->
                 e.maxBitrateBps = maxBps
                 e.minBitrateBps = CaptureFormat.MIN_BITRATE_BPS
-                e.maxFramerate = rung?.fps?.coerceAtMost(profileFps) ?: profileFps
-                e.scaleResolutionDownBy = if (softwareEncoder) p.liteScale else rung?.scale ?: 1.0
+                e.maxFramerate = fps
+                e.scaleResolutionDownBy = scale
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
             }
             if (!s.setParameters(params)) Log.w(TAG, "$viewerId: setParameters rejected")
-            // A start bitrate resets the bandwidth estimate, so it is only given before the first
-            // connection (not after a transient DISCONNECTED).
-            val start = if (everConnected) null else engine.startBitrateFor(this, maxBps)
             peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, start, maxBps)
+            lastApplied = applied
         } catch (e: RuntimeException) {
             Log.w(TAG, "$viewerId: applySendParameters failed", e)
         }
@@ -411,15 +459,21 @@ internal class ViewerPeer(
             if (ladder.index != 0) { ladder = QualityLadder.State(); applySendParameters() }
             return
         }
+        // The first polls after connecting see the estimate still ramping up from its start value.
+        if (++pollsSinceConnect <= LADDER_WARMUP_POLLS) return
         if (targetBps == null || targetBps <= 0) return
         val size = engine.captureSize ?: return
+        val share = engine.shares
         val before = ladder.index.coerceIn(0, rungs.lastIndex)
-        ladder = QualityLadder.next(rungs, size.width, size.height, ladder, targetBps)
+        ladder = QualityLadder.next(
+            rungs, size.width, size.height, ladder, targetBps, share.fullBps, SystemClock.elapsedRealtime(),
+        )
         if (ladder.index == before) return
         Log.i(
             DIAG_TAG,
             "$viewerId quality ${rungs[before].label(size.width, size.height)} -> " +
-                "${rungs[ladder.index].label(size.width, size.height)} at target=${targetBps / 1000}kbps",
+                "${rungs[ladder.index].label(size.width, size.height)} at target=${targetBps / 1000}kbps " +
+                "(hold ${ladder.holdMs / 1000}s)",
         )
         applySendParameters()
     }
@@ -512,6 +566,8 @@ internal class ViewerPeer(
         /** Delays of server renegotiations after FAILED; then the connection is only released. */
         val RENEGOTIATE_BACKOFF_MS = longArrayOf(0L, 5_000L, 15_000L)
         const val MAX_PENDING_ICE = 64
+        /** Stats polls (2 s each) after connecting before the quality ladder may move. */
+        const val LADDER_WARMUP_POLLS = 3
         const val TAG = "LocalCast/Peer"
         const val DIAG_TAG = "LocalCast/Diag"
         const val STREAM_ID = "localcast"
