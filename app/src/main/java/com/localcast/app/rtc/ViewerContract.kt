@@ -17,7 +17,16 @@ interface ViewerSessionFactory {
      * (the engine sends [ServerMessage.Offer] and [ServerMessage.Ice] through [send]).
      * Returns null when not streaming. [send] is thread-safe and non-blocking.
      */
-    fun createViewer(viewerId: String, remoteAddress: String, send: (ServerMessage) -> Unit): ViewerSession?
+    /**
+     * @param localAddress this device's IP the viewer's WebSocket arrived on (which interface:
+     *     USB tether, Wi-Fi, hotspot...), or null when unknown.
+     */
+    fun createViewer(
+        viewerId: String,
+        remoteAddress: String,
+        localAddress: String?,
+        send: (ServerMessage) -> Unit,
+    ): ViewerSession?
 }
 
 interface ViewerSession {

@@ -189,7 +189,12 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         if (isStreaming) recomputeFormat()
     }
 
-    override fun createViewer(viewerId: String, remoteAddress: String, send: (ServerMessage) -> Unit): ViewerSession? {
+    override fun createViewer(
+        viewerId: String,
+        remoteAddress: String,
+        localAddress: String?,
+        send: (ServerMessage) -> Unit,
+    ): ViewerSession? {
         if (!isStreaming) return null
         val peer = ViewerPeer(viewerId, remoteAddress, this, send)
         post {

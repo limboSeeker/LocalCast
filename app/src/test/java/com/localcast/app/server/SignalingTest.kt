@@ -37,7 +37,12 @@ class SignalingTest {
     private class FakeFactory : ViewerSessionFactory {
         @Volatile override var isStreaming = true
         val created = CopyOnWriteArrayList<FakeSession>()
-        override fun createViewer(viewerId: String, remoteAddress: String, send: (ServerMessage) -> Unit): ViewerSession? {
+        override fun createViewer(
+            viewerId: String,
+            remoteAddress: String,
+            localAddress: String?,
+            send: (ServerMessage) -> Unit,
+        ): ViewerSession? {
             val s = FakeSession(viewerId, send)
             created += s
             send(ServerMessage.Offer("offer-$viewerId"))

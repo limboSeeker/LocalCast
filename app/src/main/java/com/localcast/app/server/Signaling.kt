@@ -58,7 +58,7 @@ class Signaling(
         withTimeoutOrNull(FLUSH_TIMEOUT_MS) { snapshot.forEach { it.writer?.join() } }
     }
 
-    suspend fun handle(socket: DefaultWebSocketServerSession, remoteIp: String) = coroutineScope {
+    suspend fun handle(socket: DefaultWebSocketServerSession, remoteIp: String, localIp: String? = null) = coroutineScope {
         // Bounded: a viewer that stops reading is dropped instead of buffering without limit.
         val out = Channel<ServerMessage>(OUT_QUEUE)
         val writer = launch { writeLoop(socket, out) }
@@ -117,7 +117,7 @@ class Signaling(
             out.send(ServerMessage.Welcome(token, viewerId))
 
             session = try {
-                sessions.createViewer(viewerId, remoteIp) { msg ->
+                sessions.createViewer(viewerId, remoteIp, localIp) { msg ->
                     if (msg !is ServerMessage.Denied) {
                         synchronized(announce) {
                             if (!announced && !gone) {
