@@ -111,6 +111,10 @@ var timer = null, watchdog = null, discTimer = null, lockTimer = null, hideTimer
 var attempt = 0, joined = false, streamInfo = null, stoppedMsg = null, senderInfo = null, latencyEst = null;
 var prev = null, lastStats = null, latency = null, lastFrameT = 0, lastFrames = 0, pollN = 0, pollTimer = null;
 var wakeLock = null, lastClick = 0, paused = false;
+// A tab hidden this long leaves (bye) so the phone frees its encoder and Wi-Fi; it rejoins with the token when shown again.
+// Long enough for a quick app switch or the iOS native-fullscreen transition. ?hide_ms=N overrides it (tests).
+var HIDE_RELEASE_MS = (function () { var q = /[?&]hide_ms=(\d+)/.exec(location.search); return q ? +q[1] : 8000; })();
+var released = false, releaseTimer = null, hiddenAt = 0;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
 
@@ -246,13 +250,15 @@ function start() {
   loadInfo();
 }
 function loadInfo() {
+  if (released) return;
   setState('connecting');
   showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true });
   fetch('/api/info', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
     info = j;
+    if (released) return;
     if (info.pinRequired && !pin && !token) showPin(); else connect();
   }).catch(function () {
-    later(2000, loadInfo);
+    if (!released) later(2000, loadInfo);
   });
 }
 
@@ -265,6 +271,7 @@ function dropWS() {
   if (w) { try { w.close(); } catch (e) {} }
 }
 function connect() {
+  if (released) return;
   stopTimers();
   clearTimeout(watchdog);
   if (ws) dropWS();
@@ -372,7 +379,7 @@ function onDenied(m) {
 
 /* ---------- reconnect ---------- */
 function reconnect() {
-  if (timer || lockTimer) return;
+  if (released || timer || lockTimer) return;
   if (joined) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); card.hidden = true; }
   else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var d = BACK[Math.min(attempt, BACK.length - 1)];
@@ -517,7 +524,48 @@ function getWake() {
     }
   } catch (e) { wakePending = false; }
 }
+/* Hidden tabs release their stream: every viewer costs the phone a hardware encoder and its own Wi-Fi stream, so
+   background tabs (e.g. the same link opened three times) degrade the one actually watched. */
+function pageHidden() { return document.visibilityState === 'hidden'; }
+// Picture-in-picture (and iPhone native fullscreen, which may report the page hidden): the user is still watching.
+function watching() {
+  return !!(document.pictureInPictureElement || video.webkitDisplayingFullscreen ||
+    video.webkitPresentationMode === 'picture-in-picture' || video.webkitPresentationMode === 'fullscreen');
+}
+function armRelease() {
+  clearTimeout(releaseTimer); releaseTimer = null;
+  if (released || !pageHidden()) return;
+  releaseTimer = setTimeout(function () { release(false); }, HIDE_RELEASE_MS);
+}
+function release(force) {
+  releaseTimer = null;
+  if (released || (!force && (!pageHidden() || watching()))) return;
+  if (lockTimer || (!card.hidden && !form.hidden)) return; // PIN form: nothing to release
+  released = true;
+  stopTimers(); clearTimeout(watchdog); clearTimeout(discTimer);
+  send({ type: 'bye' }); // the phone ends the session (frees the encoder) right away
+  closePC(); dropWS();
+  video.srcObject = null;
+  joined = false; attempt = 0; lastFrameT = 0;
+  setPaused(false);
+  setState('released'); live(false);
+  showCard({ title: tr('connecting'), spin: true }); // what shows for a moment when the tab comes back
+}
+function resume() {
+  released = false;
+  if (info) connect(); else loadInfo(); // token from sessionStorage: no PIN again; fresh connection, fresh latency
+}
+['leavepictureinpicture', 'webkitpresentationmodechanged', 'webkitendfullscreen'].forEach(function (ev) {
+  video.addEventListener(ev, function () { if (pageHidden() && !releaseTimer) armRelease(); });
+});
 document.addEventListener('visibilitychange', function () {
+  if (pageHidden()) { hiddenAt = Date.now(); armRelease(); return; }
+  if (releaseTimer) {
+    clearTimeout(releaseTimer); releaseTimer = null;
+    // The timer is long overdue: the page was frozen in the background (iOS) and the old session is stale.
+    if (Date.now() - hiddenAt > HIDE_RELEASE_MS + 2000 && !watching()) { release(true); if (released) { resume(); return; } }
+  }
+  if (released) { resume(); return; }
   if (document.visibilityState !== 'visible') return;
   if (state === 'playing') getWake();
   // iOS pauses the video in the background (and after native fullscreen): resume it.
@@ -687,7 +735,9 @@ window.addEventListener('online', function () { if (state !== 'playing' && !time
 window.__localcast = {
   get state() { return state; },
   get paused() { return paused; },
+  get released() { return released; },
   STALL_MS: STALL_MS,
+  HIDE_RELEASE_MS: HIDE_RELEASE_MS,
   get wakeLock() { return !!wakeLock; },
   get stats() { return lastStats; },
   get pc() { return pc; },
