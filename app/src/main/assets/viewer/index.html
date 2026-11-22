@@ -137,6 +137,25 @@ var catchHist = [], lastCatchUp = 0, catchUps = 0;
 // A catch-up that did not help (the next one is due soon after: the link itself is the problem,
 // a restart cannot fix it) doubles the pause before the next one, up to 8x.
 var catchCooldown = CATCHUP.cooldown;
+// Multipath: the device can be reachable over several local paths at once (USB tethering, Ethernet, Wi-Fi, its hotspot).
+// The server lists its addresses (/api/info, welcome, addresses); the socket goes to curHost (ip:port), not always to
+// the page's own host. Preference usb > ethernet > wifi/hotspot > other; vpn is never used.
+// ?probe_ms= ?switch_hold_ms= override the timings (tests).
+var PATH_RANK = { usb: 0, ethernet: 1, wifi: 2, hotspot: 2, other: 3 };
+var PROBE_MS = qnum('probe_ms', 3000), PROBE_TIMEOUT_MS = 1200, SWITCH_HOLD_MS = qnum('switch_hold_ms', 10000);
+var BAD_HOST_MS = 30000, SWITCH_TIMEOUT_MS = 4000;
+function withPort(h) { return /:\d+$/.test(h) ? h : h + ':80'; }
+var pageHost = withPort(location.host), curHost = pageHost, addrs = [], srvPort = null;
+var pathSwitches = 0, probes = 0, lastSwitchAt = 0, hostPlayed = false, badHost = {}, upRun = null, upBusy = false;
+var pickGen = 0, pendingWs = null;
+// Adaptive jitter buffer (receiver.jitterBufferTarget, where supported): ~0 while the link is smooth; signs of jitter
+// (RTT spike, packets lost, frames dropped) raise it to JB.hi, JB.persist bad polls out of the last JB.window to JB.max;
+// after JB.calmMs without such signs it steps down by JB.step every JB.stepMs. JB.max stays well below the catch-up
+// limit (CATCHUP.jb). ?jb_calm_ms= ?jb_step_ms= override the timings (tests).
+var JB = { hi: 150, max: 250, persist: 3, window: 5, calmMs: qnum('jb_calm_ms', 20000), stepMs: qnum('jb_step_ms', 5000),
+  step: 50, rttX: 2, rttMin: 40 };
+function jbInit() { return { target: 0, marks: [], rtts: [], lost: null, dropped: null, lastBad: 0, lastStep: 0, why: '' }; }
+var jb = jbInit(), jbSupported = false, jbChanges = 0;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
 
@@ -155,7 +174,8 @@ var I18N = {
     na: 'н/д', ms: 'мс', mbps: 'Мбіт/с', estimate: 'оцінка', hw: 'апаратний', sw: 'програмний',
     sLatency: 'Затримка', sFps: 'FPS', sSize: 'Розмір', sBitrate: 'Бітрейт', sCodec: 'Кодек', sEncoder: 'Енкодер',
     sEncode: 'Кодування', sJitter: 'Джитер-буфер', sDecode: 'Декодування', sRtt: 'RTT', sDropped: 'Пропущено',
-    sLost: 'Втрачено', sPhone: 'Телефон',
+    sLost: 'Втрачено', sPhone: 'Телефон', target: 'ціль',
+    switchCable: 'Перемикаю на кабель…', switchNet: 'Перемикаю мережу…',
     frames: { one: 'кадр', few: 'кадри', many: 'кадрів', other: 'кадрів' },
     packets: { one: 'пакет', few: 'пакети', many: 'пакетів', other: 'пакетів' }
   },
@@ -171,7 +191,8 @@ var I18N = {
     na: 'n/a', ms: 'ms', mbps: 'Mbps', estimate: 'estimate', hw: 'hardware', sw: 'software',
     sLatency: 'Latency', sFps: 'FPS', sSize: 'Resolution', sBitrate: 'Bitrate', sCodec: 'Codec', sEncoder: 'Encoder',
     sEncode: 'Encode time', sJitter: 'Jitter buffer', sDecode: 'Decode time', sRtt: 'RTT', sDropped: 'Dropped',
-    sLost: 'Lost', sPhone: 'Phone',
+    sLost: 'Lost', sPhone: 'Phone', target: 'target',
+    switchCable: 'Switching to the cable…', switchNet: 'Switching network…',
     frames: { one: 'frame', other: 'frames' },
     packets: { one: 'packet', other: 'packets' }
   }
@@ -278,6 +299,7 @@ function loadInfo() {
   showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true });
   fetch('/api/info', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
     info = j;
+    setAddresses(j.addresses, j.port);
     if (released) return;
     if (info.pinRequired && !pin && !token) showPin(); else connect();
   }).catch(function () {
@@ -297,10 +319,11 @@ function connect() {
   if (released) return;
   stopTimers();
   clearTimeout(watchdog);
+  pickGen++; dropPending();
   if (ws) dropWS();
   if (!joined) { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var w;
-  try { w = new WebSocket('ws://' + location.host + '/ws'); } catch (e) { reconnect(); return; }
+  try { w = new WebSocket('ws://' + curHost + '/ws'); } catch (e) { reconnect(); return; }
   ws = w;
   arm(8000);
   w.onopen = function () {
@@ -310,8 +333,12 @@ function connect() {
     w.send(JSON.stringify(h));
   };
   w.onmessage = function (e) { if (w === ws) onMsg(e.data); };
-  w.onclose = function () { if (w === ws) { ws = null; closePC(); reconnect(); } };
+  w.onclose = onWsClose(w);
   w.onerror = function () {};
+}
+// While a path switch is in flight the old socket is closed by the server (same token): the switch decides what next.
+function onWsClose(w) {
+  return function () { if (w === ws) { ws = null; if (!pendingWs) { closePC(); reconnect(); } } };
 }
 // watchdog: if nothing useful happens within ms -> full reconnect
 function arm(ms) {
@@ -324,6 +351,7 @@ function onMsg(data) {
   switch (m.type) {
     case 'welcome':
       token = m.token; pin = null; joined = true; stoppedMsg = null;
+      setAddresses(m.addresses, m.port);
       setPaused(false); // a pause from before a reconnect is stale; the server re-sends state{streaming:false} if still paused
       try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
       arm(10000);
@@ -331,6 +359,7 @@ function onMsg(data) {
     case 'offer': handleOffer(m.sdp); break;
     case 'ice': handleIce(m.candidate); break;
     case 'sender': senderInfo = m; break;
+    case 'addresses': setAddresses(m.addresses, m.port); break;
     case 'state':
       streamInfo = m;
       setPaused(m.streaming === false);
@@ -402,21 +431,175 @@ function onDenied(m) {
 
 /* ---------- reconnect ---------- */
 function reconnect() {
-  if (released || timer || lockTimer) return;
+  if (released || timer || lockTimer || pendingWs) return;
+  // This path never got to play since it was picked: try the others first for a while.
+  if (!hostPlayed && pathHosts().length > 1) badHost[curHost] = Date.now() + BAD_HOST_MS;
   if (joined) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); card.hidden = true; }
   else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var d = BACK[Math.min(attempt, BACK.length - 1)];
   attempt++;
   later(d, function () {
-    if (ws && ws.readyState === 1) { closePC(); send({ type: 'restart' }); arm(8000); }
-    else connect();
+    if (ws && ws.readyState === 1) { closePC(); restartOrMove(); }
+    else connectAny();
   });
 }
+
+/* ---------- multipath ---------- */
+function rankKind(k) { return PATH_RANK.hasOwnProperty(k) ? PATH_RANK[k] : 3; }
+function addrOf(host) { for (var i = 0; i < addrs.length; i++) if (addrs[i].host === host) return addrs[i]; return null; }
+// The page's own host counts as Wi-Fi when the server does not list it; a host that left the list is the last resort.
+function rankOf(host) { var a = addrOf(host); return a ? rankKind(a.kind) : host === pageHost ? 2 : 9; }
+function setAddresses(list, port) {
+  if (!Array.isArray(list)) return;
+  if (typeof port === 'number' && port > 0 && port < 65536) srvPort = port;
+  var def = srvPort || +location.port || 80, out = [];
+  list.forEach(function (a) {
+    if (!a || typeof a.ip !== 'string' || !a.ip || a.kind === 'vpn') return;
+    var p = typeof a.port === 'number' && a.port > 0 ? a.port : def;
+    out.push({ ip: a.ip, kind: String(a.kind || 'other'), port: p, host: (a.ip.indexOf(':') >= 0 ? '[' + a.ip + ']' : a.ip) + ':' + p });
+  });
+  addrs = out;
+}
+// Every host worth trying, best first: the device's addresses and the page's own host; hosts that failed recently
+// go last, the current one first among equals.
+function pathHosts() {
+  var now = Date.now(), seen = {}, list = [];
+  addrs.map(function (a) { return a.host; }).concat([pageHost]).forEach(function (h) { if (!seen[h]) { seen[h] = 1; list.push(h); } });
+  var key = function (h) { return [badHost[h] > now ? 1 : 0, rankOf(h), h === curHost ? 0 : 1]; };
+  return list.map(function (h, i) { return { h: h, k: key(h).concat([i]) }; }).sort(function (a, b) {
+    for (var j = 0; j < a.k.length; j++) if (a.k[j] !== b.k[j]) return a.k[j] - b.k[j];
+    return 0;
+  }).map(function (x) { return x.h; });
+}
+// true when the host answers GET /health within PROBE_TIMEOUT_MS (an opaque no-cors response is enough).
+function probe(host) {
+  probes++;
+  return new Promise(function (resolve) {
+    var ctl = null, done = false, t = null;
+    try { ctl = new AbortController(); } catch (e) {}
+    var fin = function (ok) {
+      if (done) return;
+      done = true; clearTimeout(t);
+      if (!ok && ctl) { try { ctl.abort(); } catch (e) {} }
+      resolve(ok);
+    };
+    t = setTimeout(function () { fin(false); }, PROBE_TIMEOUT_MS);
+    try {
+      fetch('http://' + host + '/health', { mode: 'no-cors', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+        .then(function () { fin(true); }, function () { fin(false); });
+    } catch (e) { fin(false); }
+  });
+}
+function setHost(h, why) {
+  if (h === curHost) return;
+  console.info('LocalCast path: ' + curHost + ' -> ' + h + ' (' + why + ')');
+  curHost = h; hostPlayed = false; pathSwitches++; lastSwitchAt = Date.now(); upRun = null;
+  jbReset(true); // another link: start smooth again
+}
+// Fallback: (re)connect over the best path that answers /health (all probed at once, decided as soon as every better
+// one has failed); the current one if none does. skip: a host just found dead, not waited for again.
+function connectAny(skip) {
+  if (released) return;
+  var all = pathHosts(), hosts = all.filter(function (h) { return h !== skip; });
+  if (all.length < 2 || !hosts.length) { connect(); return; }
+  var my = ++pickGen, res = hosts.map(function () { return null; }), done = false;
+  var decide = function () {
+    if (done || my !== pickGen || released) return;
+    for (var i = 0; i < hosts.length; i++) {
+      if (res[i] === null) return; // a better path has not answered yet
+      if (res[i]) { done = true; setHost(hosts[i], 'fallback'); connect(); return; }
+    }
+    done = true; connect(); // nothing answers: keep trying the current path (normal backoff)
+  };
+  hosts.forEach(function (h, i) { probe(h).then(function (ok) { res[i] = ok; decide(); }); });
+}
+// The media path failed while the socket still looks open. On a multipath device first check that this path still
+// answers (a pulled cable leaves the socket open for a long time); if not, move to another one.
+function restartOrMove() {
+  if (pathHosts().length < 2) { send({ type: 'restart' }); arm(8000); return; }
+  var my = ++pickGen, w = ws;
+  probe(curHost).then(function (ok) {
+    if (my !== pickGen || released || ws !== w) return;
+    if (ok && ws && ws.readyState === 1) { send({ type: 'restart' }); arm(8000); return; }
+    console.info('LocalCast path: ' + curHost + ' does not answer');
+    dropWS(); closePC(); connectAny(curHost);
+  });
+}
+function dropPending() {
+  var w = pendingWs; pendingWs = null;
+  if (w) { w.onopen = w.onmessage = w.onclose = null; try { w.close(); } catch (e) {} }
+}
+// Upgrade: every PROBE_MS while playing, probe the addresses better than the current one; the best one that answers
+// twice in a row gets a new socket (hello with the token; the server replaces the old connection). Not within
+// SWITCH_HOLD_MS of the last switch, never while hidden or released.
+function upgradeTick() {
+  if (upBusy) return;
+  if (released || pageHidden() || !joined || state !== 'playing' || pendingWs || !ws || ws.readyState !== 1) { upRun = null; return; }
+  if (Date.now() - lastSwitchAt < SWITCH_HOLD_MS) return;
+  var now = Date.now(), cur = rankOf(curHost), seen = {};
+  var better = addrs.filter(function (a) {
+    if (a.host === curHost || seen[a.host] || badHost[a.host] > now || rankKind(a.kind) >= cur) return false;
+    seen[a.host] = 1; return true;
+  }).sort(function (a, b) { return rankKind(a.kind) - rankKind(b.kind); }).map(function (a) { return a.host; });
+  if (!better.length) { upRun = null; return; }
+  upBusy = true;
+  Promise.all(better.map(probe)).then(function (ok) {
+    upBusy = false;
+    if (released || pageHidden() || !joined || state !== 'playing' || pendingWs) { upRun = null; return; }
+    var h = null;
+    for (var i = 0; i < better.length; i++) if (ok[i]) { h = better[i]; break; }
+    if (!h) { upRun = null; return; }
+    upRun = upRun && upRun.host === h ? { host: h, n: upRun.n + 1 } : { host: h, n: 1 };
+    if (upRun.n >= 2) switchPath(h);
+  });
+}
+// Make before break: the old socket and video stay until the new socket is welcomed; a new path that fails to welcome
+// within SWITCH_TIMEOUT_MS is abandoned (and avoided for BAD_HOST_MS), the old one carries on.
+function switchPath(h) {
+  var a = addrOf(h), w;
+  upRun = null;
+  try { w = new WebSocket('ws://' + h + '/ws'); } catch (e) { badHost[h] = Date.now() + BAD_HOST_MS; return; }
+  pendingWs = w;
+  var to = setTimeout(function () { abandon('timeout'); }, SWITCH_TIMEOUT_MS);
+  var abandon = function (why) {
+    if (pendingWs !== w) return;
+    clearTimeout(to); dropPending();
+    badHost[h] = Date.now() + BAD_HOST_MS;
+    console.info('LocalCast path: switch to ' + h + ' failed (' + why + ')');
+    if (!ws || !pc) { closePC(); reconnect(); } // the old path went down meanwhile
+  };
+  w.onopen = function () {
+    if (pendingWs !== w) return;
+    var hello = { type: 'hello', userAgent: navigator.userAgent };
+    if (token) hello.token = token;
+    w.send(JSON.stringify(hello));
+  };
+  w.onmessage = function (e) {
+    if (pendingWs !== w) return;
+    var m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (!m || m.type !== 'welcome') { abandon(m && m.type); return; }
+    clearTimeout(to); pendingWs = null;
+    var old = ws; ws = w;
+    if (old) { old.onclose = null; try { old.close(); } catch (x) {} }
+    closePC();
+    setHost(h, 'upgrade');
+    setState('reconnecting');
+    showPill(tr(a && a.kind === 'usb' ? 'switchCable' : 'switchNet'), 'var(--acc-hi)', false);
+    attempt = 0;
+    w.onmessage = function (ev) { if (w === ws) onMsg(ev.data); };
+    w.onclose = onWsClose(w);
+    onMsg(e.data);
+  };
+  w.onclose = function () { abandon('closed'); };
+  w.onerror = function () {};
+}
+setInterval(upgradeTick, PROBE_MS);
 
 /* ---------- WebRTC ---------- */
 function closePC() {
   clearTimeout(discTimer);
   var p = pc; pc = null; remoteSet = false; pendingIce = []; prev = null; latency = null; latencyEst = null; lastFrames = 0; catchHist = [];
+  jbReset(false);
   if (p) {
     p.ontrack = p.onicecandidate = p.onconnectionstatechange = p.oniceconnectionstatechange = null;
     try { p.close(); } catch (e) {}
@@ -455,9 +638,59 @@ function lost() {
 function tune(r) {
   try {
     if (!r) return;
-    if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
+    if ('jitterBufferTarget' in r) { jbSupported = true; if (r.jitterBufferTarget !== jb.target) r.jitterBufferTarget = jb.target; }
     else if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
   } catch (e) {}
+}
+function videoReceiver() {
+  try { return pc && pc.getReceivers ? pc.getReceivers().filter(function (r) { return r.track && r.track.kind === 'video'; })[0] || null : null; }
+  catch (e) { return null; }
+}
+
+/* ---------- adaptive jitter buffer ---------- */
+function median(a) {
+  var b = a.slice().sort(function (x, y) { return x - y; }), n = b.length;
+  return n ? (n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2) : null;
+}
+// Pure: the jitter-buffer state after one stats sample ({rttMs, packetsLost, framesDropped}; counters are cumulative).
+function jbDecide(st, s, now, cfg) {
+  cfg = cfg || JB;
+  var n = { target: st.target, marks: st.marks.slice(), rtts: st.rtts.slice(), lost: st.lost, dropped: st.dropped,
+    lastBad: st.lastBad, lastStep: st.lastStep, why: '' };
+  var why = [], rtt = num(s.rttMs), lost = num(s.packetsLost), dr = num(s.framesDropped);
+  if (rtt !== null) {
+    var med = n.rtts.length >= 3 ? median(n.rtts) : null;
+    if (med !== null && rtt > cfg.rttX * med && rtt > cfg.rttMin) why.push('RTT ' + Math.round(rtt) + ' ms, median ' + Math.round(med));
+    n.rtts.push(rtt); if (n.rtts.length > 10) n.rtts.shift();
+  }
+  if (lost !== null) { if (n.lost !== null && lost > n.lost) why.push('packets lost +' + (lost - n.lost)); n.lost = lost; }
+  if (dr !== null) { if (n.dropped !== null && dr > n.dropped) why.push('frames dropped +' + (dr - n.dropped)); n.dropped = dr; }
+  var bad = why.length > 0;
+  n.marks.push(bad); if (n.marks.length > cfg.window) n.marks.shift();
+  if (bad) {
+    var cnt = n.marks.filter(Boolean).length;
+    n.target = Math.min(cfg.max, Math.max(n.target, cnt >= cfg.persist ? cfg.max : cfg.hi));
+    n.lastBad = now; n.lastStep = now; n.why = why.join(', ');
+  } else if (n.target > 0 && now - n.lastBad >= cfg.calmMs && now - n.lastStep >= cfg.stepMs) {
+    n.target = Math.max(0, n.target - cfg.step); n.lastStep = now; n.why = 'calm';
+  }
+  return n;
+}
+function jbLog(from, why) {
+  console.info('LocalCast jitter buffer: ' + from + ' -> ' + jb.target + ' ms (' + why + ')' +
+    (jbSupported ? '' : ' [not applied: no jitterBufferTarget]'));
+}
+// Called with every stats sample while playing (and by debugJitter in tests).
+function jbSample(s) {
+  if (state !== 'playing' || paused || !pc) return;
+  var from = jb.target;
+  jb = jbDecide(jb, s, Date.now(), JB);
+  if (jb.target !== from) { jbChanges++; jbLog(from, jb.why); tune(videoReceiver()); }
+}
+// New PeerConnection: its counters start from zero (keep the target). New path (all): start from 0 again.
+function jbReset(all) {
+  if (all) { var from = jb.target; jb = jbInit(); if (from) { jbChanges++; jbLog(from, 'new path'); } return; }
+  jb.lost = null; jb.dropped = null; jb.rtts = [];
 }
 function preferCodecs(p) {
   try {
@@ -512,6 +745,7 @@ function onFrames() {
   // A late frame callback can arrive after the session was torn down (bye, PIN form): ignore it.
   if (!pc || !joined) return;
   lastFrameT = Date.now();
+  hostPlayed = true;
   if (state === 'playing') return;
   setState('playing');
   clearTimeout(watchdog);
@@ -569,6 +803,7 @@ function release(force) {
   if (lockTimer || (!card.hidden && !form.hidden)) return; // PIN form: nothing to release
   released = true;
   stopTimers(); clearTimeout(watchdog); clearTimeout(discTimer);
+  pickGen++; dropPending(); upRun = null;
   send({ type: 'bye' }); // the phone ends the session (frees the encoder) right away
   closePC(); dropWS();
   video.srcObject = null;
@@ -611,9 +846,13 @@ function fmt(x, d, u) { return x === null || x === undefined ? tr('na') : x.toFi
 // Phone re-sends the picture at >= 2 fps even when the screen is static, so a longer gap means
 // the media path is dead even though ICE may still look "connected".
 var STALL_MS = 4000;
-function recoverMedia() {
+// direct: restart on this socket without checking the path (latency catch-up: the path works, the buffer is the problem).
+function recoverMedia(direct) {
   closePC();
-  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); send({ type: 'restart' }); arm(8000); }
+  if (ws && ws.readyState === 1) {
+    setState('reconnecting'); showPill(tr('reconnecting'), 0, true);
+    if (direct) { send({ type: 'restart' }); arm(8000); } else restartOrMove();
+  }
   else { dropWS(); reconnect(); }
 }
 // One stats sample for the catch-up decision: 'bad' (buffer or measured latency over the limit), 'good', or null
@@ -649,7 +888,7 @@ function catchUpSample(s) {
     catchHist.map(function (x) { return x.latencyEstimated ? 'est' : r(x.latencyMs); }).join('/') + ' ms > ' + CATCHUP.lat +
     '): restarting the connection');
   lastCatchUp = now; catchUps++; catchHist = [];
-  recoverMedia();
+  recoverMedia(true);
 }
 function poll() {
   var p = pc;
@@ -708,7 +947,9 @@ function poll() {
     }
     prev = { t: now, fd: fd, bytes: bytes, jbd: jbd, jbc: jbc, dec: dec };
     if (fd > lastFrames) { lastFrames = fd; lastFrameT = Date.now(); onFrames(); }
-    tune(p.getReceivers && p.getReceivers().filter(function (r) { return r.track && r.track.kind === 'video'; })[0]);
+    jbSample(s);
+    tune(videoReceiver());
+    s.jitterTargetMs = jbSupported ? jb.target : null;
     lastStats = s;
     if (!statsEl.hidden) renderStats(s);
     if (++pollN % 2 === 0 && state === 'playing') report(s);
@@ -725,7 +966,7 @@ function renderStats(s) {
     [tr('sCodec'), s.codec || na],
     [tr('sEncoder'), senderInfo && senderInfo.encoder ? senderInfo.encoder + (senderInfo.hardware === true ? ' (' + tr('hw') + ')' : senderInfo.hardware === false ? ' (' + tr('sw') + ')' : '') : na],
     [tr('sEncode'), fmt(senderInfo ? num(senderInfo.encodeMs) : null, 1, ms)],
-    [tr('sJitter'), fmt(s.jitterBufferMs, 0, ms)],
+    [tr('sJitter'), fmt(s.jitterBufferMs, 0, ms) + (s.jitterTargetMs ? ' (' + tr('target') + ' ' + s.jitterTargetMs + ms + ')' : '')],
     [tr('sDecode'), fmt(s.decodeMs, 1, ms)],
     [tr('sRtt'), fmt(s.rttMs, 0, ms)],
     [tr('sDropped'), s.framesDropped === null ? na : trCount('frames', s.framesDropped)],
@@ -812,6 +1053,24 @@ window.__localcast = {
   shouldCatchUp: shouldCatchUp,
   // Tests: feed a stats sample ({jitterBufferMs, latencyMs, latencyEstimated}) into the same catch-up path as poll().
   debugStats: function (s) { catchUpSample(s || {}); },
+  get curHost() { return curHost; },
+  get pageHost() { return pageHost; },
+  get addresses() { return addrs.map(function (a) { return { ip: a.ip, kind: a.kind, port: a.port, host: a.host }; }); },
+  get pathHosts() { return pathHosts(); },
+  get pathSwitches() { return pathSwitches; },
+  get probes() { return probes; },
+  get switching() { return !!pendingWs; },
+  PROBE_MS: PROBE_MS,
+  SWITCH_HOLD_MS: SWITCH_HOLD_MS,
+  JB: JB,
+  jbDecide: jbDecide,
+  jbInit: jbInit,
+  get jitterTarget() { return jb.target; },
+  get jitterChanges() { return jbChanges; },
+  get jitterSupported() { return jbSupported; },
+  get receiverJitterTarget() { var r = videoReceiver(); return r && 'jitterBufferTarget' in r ? r.jitterBufferTarget : undefined; },
+  // Tests: feed a stats sample ({rttMs, packetsLost, framesDropped}) into the same jitter-buffer path as poll().
+  debugJitter: function (s) { jbSample(s || {}); return jb.target; },
   get wakeLock() { return !!wakeLock; },
   get stats() { return lastStats; },
   get pc() { return pc; },

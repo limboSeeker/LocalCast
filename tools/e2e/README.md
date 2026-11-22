@@ -19,5 +19,14 @@ The phone mock (`mock-server.mjs`) serves `app/src/main/assets/viewer/index.html
   the same decision as the 1 s stats poll (`catchUps`, `catchUpRun` show the result; `shouldCatchUp(history, now, lastAt, cfg)`
   is the pure decision). Samples are fed synchronously so real polls cannot interleave; `?catchup_jb=`, `?catchup_lat=`,
   `?catchup_ms=` override 400 ms / 800 ms / 60 s
+- Multipath: the main listener is the device's `wifi` address; `POST /mock/usb?up=1` starts a second listener (another
+  port on 127.0.0.1, same app) and lists it as `usb` with its own `port`; `up=0` unplugs it (`mode=close` closes its
+  sockets, `mode=blackhole` leaves them open but silent and drops the phone's PeerConnection, like a pulled cable;
+  `listed=1` keeps the dead address listed, `announce=0` skips the `addresses` message). A `vpn` entry on a dead port is
+  always listed. `GET /mock/state` adds `viewerVia` (`main`|`usb`), `usbPort`, `health` (probe hits per listener).
+  `?probe_ms=` / `?switch_hold_ms=` shorten 3 s / 10 s; `window.__localcast.curHost`, `pathHosts`, `pathSwitches`, `probes`
+- Jitter buffer: `window.__localcast.debugJitter({rttMs, packetsLost, framesDropped})` feeds the adaptive decision
+  (`jitterTarget`, `receiverJitterTarget`; pure `jbDecide(state, sample, now, cfg)`); `?jb_calm_ms=` / `?jb_step_ms=`
+  shorten 20 s / 5 s
 
 Languages: the viewer page follows `navigator.languages` (`uk*` → Ukrainian, otherwise English). Most checks run in a `uk-UA` browser context and match Ukrainian texts; the `en-US` tests check the English PIN form, the wrong-PIN error and the stats overlay, and `?lang=` overrides.

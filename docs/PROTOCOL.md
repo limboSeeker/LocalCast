@@ -7,8 +7,8 @@ Kotlin source of truth: `app/src/main/java/com/localcast/app/server/Protocol.kt`
 | Method | Path | Response |
 |---|---|---|
 | GET | `/` | `viewer/index.html` (text/html; utf-8, `Cache-Control: no-store`) |
-| GET | `/api/info` | `{"name":"LocalCast","pinRequired":true,"streaming":true,"protocol":1}` |
-| GET | `/health` | `ok` |
+| GET | `/api/info` | `{"name":"LocalCast","pinRequired":true,"streaming":true,"protocol":1,"addresses":[...],"port":8080}` |
+| GET | `/health` | `ok` (no auth; the viewer probes other addresses with a `no-cors` fetch) |
 | WS | `/ws` | signaling, one JSON object per text frame, discriminator field `type` |
 
 QR/link: `http://<ip>:<port>/#pin=123456` (exactly 6 digits; anything else shows the PIN form). The PIN is in the fragment (never part of an HTTP request). The page reads it and removes it from the address bar.
@@ -31,7 +31,9 @@ All `stats` fields are optional. `report` is sent every ~2 s. `latencyEstimated=
 
 Phone → browser:
 ```json
-{"type":"welcome","token":"<token>","viewerId":"v3","protocol":1}
+{"type":"welcome","token":"<token>","viewerId":"v3","protocol":1,
+ "addresses":[{"ip":"192.168.42.129","kind":"usb"},{"ip":"192.168.1.5","kind":"wifi"}],"port":8080}
+{"type":"addresses","addresses":[{"ip":"192.168.1.5","kind":"wifi"}],"port":8080}  // address set changed (cable unplugged…)
 {"type":"denied","reason":"pin"}                      // wrong PIN
 {"type":"denied","reason":"locked","retryAfterSec":60} // too many attempts from this IP
 {"type":"denied","reason":"token"}                    // token unknown/expired → show the PIN form
@@ -46,6 +48,12 @@ Phone → browser:
 {"type":"bye","reason":"stopped"}                     // casting stopped on the phone
 ```
 After `denied` the server closes the socket.
+
+`addresses` (in `/api/info`, `welcome` and the `addresses` message): this device's own IPv4 addresses, `kind` one of
+`usb`, `ethernet`, `wifi`, `hotspot`, `vpn`, `other`; an entry may carry its own `port` (default: the message's `port`,
+the one port the server listens on for all addresses). `addresses` defaults to `[]` and `port` to absent/null (older
+servers, not wired yet): the viewer then uses only the page's own host. The server sends `addresses` to every viewer
+when the set changes (`Signaling.broadcastAddresses()`).
 
 All messages carry machine-readable codes only (`reason`, `type`); the viewer page turns them into text in its own language.
 
@@ -79,6 +87,35 @@ All messages carry machine-readable codes only (`reason`, `type`); the viewer pa
 - `token` → drop the token, show the PIN form (if `pinRequired`), otherwise send `hello{}` right away.
 - A new `hello` with a token that already has an active connection replaces it (the server closes the old one).
 
+## Multipath (browser)
+The device can be reachable over several local paths at once (USB tethering to a laptop, Ethernet, Wi-Fi, its own
+hotspot). The page keeps the server's address list and connects the WebSocket to `curHost` (ip:port), which starts as
+the page's own host. Preference: `usb` > `ethernet` > `wifi`/`hotspot` > `other`; `vpn` is never used. The page's own
+host counts as `wifi` when it is not listed.
+- Upgrade: while playing (visible, not released), every 3 s the page probes the listed addresses better than `curHost`
+  with `fetch('http://<ip>:<port>/health', {mode:'no-cors', cache:'no-store'})` (1.2 s timeout). The best one that
+  answers twice in a row gets a new WebSocket with `hello{token}` (make before break: the old socket and video stay
+  until `welcome` arrives on the new one; the server replaces the old connection by token). Then a fresh
+  PeerConnection; a brief pill "Switching to the cable…" (usb) / "Switching network…". No switch within 10 s of the
+  last one. A new path that does not welcome within 4 s is abandoned and avoided for 30 s.
+- Fallback: when the WebSocket closes or the connection fails (reconnect, stall), the next attempt probes every known
+  path (listed addresses and the page's own host, best first) and connects to the best one that answers — no PIN, the
+  token is reused. If the socket still looks open after a media failure, the current path is probed first: a pulled
+  cable leaves the socket open, so a silent path is dropped instead of waiting for the socket to time out. A path that
+  never got to play since it was picked is tried last for 30 s.
+- A hidden released tab neither probes nor reconnects. `?probe_ms=` and `?switch_hold_ms=` override 3 s / 10 s (tests).
+- The token lives in sessionStorage, which is per origin: a page loaded from another address asks for the PIN once.
+
+## Jitter buffer (browser)
+Where `RTCRtpReceiver.jitterBufferTarget` exists (feature-detected; otherwise `playoutDelayHint = 0` as before), the page
+adapts it after every 1 s stats poll while playing and not paused:
+- Signs of jitter: RTT > 2× its recent median (last 10 polls) and > 40 ms, `packetsLost` or `framesDropped` increasing.
+- A bad poll raises the target to 150 ms; 3 bad polls out of the last 5 → 250 ms (never more; the latency catch-up
+  restarts at a 400 ms buffer, so the target can never trigger it by itself).
+- After 20 s without signs it steps down by 50 ms every 5 s to 0 (the default: lowest latency on a smooth link).
+- A new PeerConnection keeps the target (counters start again); a new path starts at 0. Changes are logged with
+  `console.info`. `?jb_calm_ms=` / `?jb_step_ms=` override 20 s / 5 s (tests).
+
 ## Hidden tabs (browser)
 Every viewer costs the phone a hardware encoder and its own Wi-Fi stream, so background tabs degrade the watched one.
 - Page hidden (`visibilityState === 'hidden'`) for 8 s → the viewer sends `bye`, closes the PeerConnection and the WS
@@ -98,5 +135,7 @@ Every viewer costs the phone a hardware encoder and its own Wi-Fi stream, so bac
 - 6-digit PIN; 5 wrong attempts from one IP → 60 s lockout; constant-time comparison.
 - 128-bit token, valid until the PIN changes ("New PIN") or the app restarts. The PIN and tokens survive stopping/starting the cast, so viewers come back on their own.
 - A WebSocket with a foreign `Origin` (a page from another site) is rejected, which protects against cross-site WebSocket hijacking.
+  Allowed: the same origin as `Host`, or an `http` origin whose host is one of this device's own IPv4 addresses on the
+  same port as `Host` (a page loaded from the Wi-Fi address opens the socket on the USB address and vice versa).
 - Turning on "Require PIN" during a cast revokes tokens and disconnects viewers (`bye{pin_changed}`).
 - Media is encrypted with DTLS-SRTP (mandatory in WebRTC). Signaling is HTTP on the local network.

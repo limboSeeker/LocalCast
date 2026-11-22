@@ -27,6 +27,11 @@ class Signaling(
     private val listener: Listener,
     /** No cap by default: each viewer gets its own encoder; when hardware encoders run out, new viewers fall back to software VP8. */
     private val maxViewers: Int = Int.MAX_VALUE,
+    /**
+     * This device's addresses and the server port, sent in `welcome` and by [broadcastAddresses]
+     * (e.g. `{ NetAddresses.current().toDtos() to boundPort }`). Called on the socket's coroutine: keep it cheap.
+     */
+    private val addresses: () -> Pair<List<AddressDto>, Int?> = { emptyList<AddressDto>() to null },
 ) {
     interface Listener {
         fun onViewerJoined(viewerId: String, remoteIp: String, userAgent: String?)
@@ -47,6 +52,23 @@ class Signaling(
     fun broadcast(message: ServerMessage) {
         val snapshot = synchronized(lock) { conns.values.toList() }
         snapshot.forEach { it.out.trySend(message) }
+    }
+
+    /**
+     * Tells every connected viewer the current address set (call when interfaces change: USB tethering
+     * plugged/unplugged, Wi-Fi joined/lost). No-op while the port is unknown.
+     */
+    fun broadcastAddresses() {
+        val (list, port) = currentAddresses()
+        if (port == null) return
+        broadcast(ServerMessage.Addresses(list, port))
+    }
+
+    private fun currentAddresses(): Pair<List<AddressDto>, Int?> = try {
+        addresses()
+    } catch (e: Exception) {
+        Log.w(TAG, "addresses provider failed", e)
+        emptyList<AddressDto>() to null
     }
 
     suspend fun disconnectAll(reason: String) {
@@ -114,7 +136,8 @@ class Signaling(
             replaced?.session?.close()
             replaced?.out?.close()
 
-            out.send(ServerMessage.Welcome(token, viewerId))
+            val (addressList, port) = currentAddresses()
+            out.send(ServerMessage.Welcome(token, viewerId, addresses = addressList, port = port))
 
             session = try {
                 sessions.createViewer(viewerId, remoteIp, localIp) { msg ->

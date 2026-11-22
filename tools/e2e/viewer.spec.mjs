@@ -518,3 +518,168 @@ test('latency catch-up: a single spike, estimated latency or a paused cast do no
   assert.equal(await state(v), 'playing');
   assert.deepEqual(errors, []);
 });
+
+/* ---------- multipath: the mock lists a "wifi" address (the page's own host) and, on demand, a "usb" one ---------- */
+const FAST_PATH = '?probe_ms=1000&switch_hold_ms=3000';
+// Probes of a dead address and the killed sockets show up as console errors: expected here.
+const NET_NOISE = /WebSocket connection to .* failed|Failed to load resource|ERR_CONNECTION_REFUSED|Could not connect|network connection was lost/;
+const realErrors = () => errors.filter((e) => !NET_NOISE.test(e));
+const watchPill = (page) => page.evaluate(() => {
+  window.__pills = [];
+  new MutationObserver(() => window.__pills.push(document.getElementById('ptxt').textContent))
+    .observe(document.getElementById('ptxt'), { childList: true, characterData: true, subtree: true });
+});
+const onHost = (page, host, min = 10) => page.waitForFunction(([h, n]) => window.__localcast.curHost === h && window.__localcast.state === 'playing'
+  && !window.__localcast.switching && window.__localcast.stats && window.__localcast.stats.framesDecoded > n, [host, min], { timeout: 25000 });
+const usbUp = async (q = '') => (await (await post('/mock/usb?up=1' + q)).json()).usbPort;
+
+test('multipath: wifi page upgrades to usb when it appears, falls back on unplug (no PIN), returns on replug', async () => {
+  const v = await viewer(FAST_PATH + '#pin=123456');
+  await playing(v);
+  const wifi = '127.0.0.1:' + mock.port;
+  assert.equal(await v.evaluate(() => window.__localcast.curHost), wifi);
+  // vpn is listed by the mock but never a candidate; the page's own host is the only path for now.
+  assert.deepEqual(await v.evaluate(() => window.__localcast.pathHosts), [wifi]);
+  await watchPill(v);
+  const t0 = Date.now();
+  const usbPort = await usbUp();
+  const usb = '127.0.0.1:' + usbPort;
+  await onHost(v, usb);
+  console.log('upgrade to usb took', Date.now() - t0, 'ms');
+  assert.deepEqual(await v.evaluate(() => window.__localcast.pathHosts), [usb, wifi]);
+  let s = await mockState();
+  assert.equal(s.viewerVia, 'usb');
+  assert.equal(s.lastHello, 'token');
+  assert.ok(s.health.usb >= 2, 'probed usb twice before switching');
+  assert.equal(await v.evaluate(() => window.__localcast.pathSwitches), 1);
+  assert.ok((await v.evaluate(() => window.__pills)).some((t) => /Перемикаю на кабель/.test(t)), 'cable pill shown');
+  assert.ok(!(await v.locator('#pinform').isVisible()));
+
+  // Unplug like a pulled cable: the usb socket stays open but silent, the media stops, nothing announces it.
+  const t1 = Date.now();
+  await post('/mock/usb?up=0&mode=blackhole&announce=0&listed=1');
+  await onHost(v, wifi);
+  console.log('fallback to wifi took', Date.now() - t1, 'ms');
+  assert.ok(Date.now() - t1 < 15000);
+  s = await mockState();
+  assert.equal(s.viewerVia, 'main');
+  assert.equal(s.lastHello, 'token');
+  assert.ok(!(await v.locator('#pinform').isVisible()), 'no PIN asked');
+  assert.equal(await v.evaluate(() => window.__localcast.pathSwitches), 2);
+  // While the dead usb stays listed the page keeps probing it (every probe_ms) and stays on wifi.
+  await v.waitForTimeout(2500);
+  assert.equal(await v.evaluate(() => window.__localcast.curHost), wifi);
+
+  // Replug: same port again, announced.
+  await usbUp();
+  await onHost(v, usb);
+  assert.equal((await mockState()).viewerVia, 'usb');
+  assert.equal(await v.evaluate(() => window.__localcast.pathSwitches), 3);
+  assert.equal(await state(v), 'playing');
+  assert.deepEqual(realErrors(), []);
+});
+
+test('multipath: usb socket closed and address removed -> back on wifi at once; page loaded from usb falls back too', async () => {
+  const usbPort = await usbUp();
+  const usb = '127.0.0.1:' + usbPort, wifi = '127.0.0.1:' + mock.port;
+  const v = await viewer(FAST_PATH + '#pin=123456');
+  await playing(v);
+  await onHost(v, usb);
+  const t1 = Date.now();
+  await post('/mock/usb?up=0&mode=close');
+  await onHost(v, wifi);
+  console.log('fallback after close took', Date.now() - t1, 'ms');
+  assert.deepEqual(await v.evaluate(() => window.__localcast.pathHosts), [wifi]);
+  assert.ok(!(await v.locator('#pinform').isVisible()));
+  // A page opened from the usb address itself (its own origin, so its own PIN and token) falls back to the listed
+  // wifi address. The mock serves one viewer: the first page leaves.
+  await v.close();
+  await usbUp();
+  const p2 = await ctx.newPage();
+  p2.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await p2.goto('http://' + usb + '/' + FAST_PATH + '#pin=123456');
+  await onHost(p2, usb);
+  assert.equal(await p2.evaluate(() => window.__localcast.pageHost), usb);
+  await post('/mock/usb?up=0&mode=close');
+  await onHost(p2, wifi);
+  assert.ok(!(await p2.locator('#pinform').isVisible()), 'no PIN asked');
+  assert.equal((await mockState()).viewerVia, 'main');
+  assert.deepEqual(realErrors(), []);
+});
+
+test('multipath: a hidden released tab does not probe; probing resumes when shown', async () => {
+  // usb listed but dead: a playing page probes it every probe_ms and stays on wifi.
+  const v = await viewer(FAST_PATH + '&hide_ms=1000#pin=123456');
+  await playing(v);
+  await usbUp('&announce=1');
+  await post('/mock/usb?up=0&listed=1');
+  await v.waitForFunction(() => window.__localcast.addresses.some((a) => a.kind === 'usb'));
+  const p0 = await v.evaluate(() => window.__localcast.probes);
+  await v.waitForTimeout(2500);
+  const p1 = await v.evaluate(() => window.__localcast.probes);
+  assert.ok(p1 > p0, `probes while playing ${p0} -> ${p1}`);
+  await setVisibility(v, 'hidden');
+  await v.waitForFunction(() => window.__localcast.released, null, { timeout: 5000 });
+  const p2 = await v.evaluate(() => window.__localcast.probes);
+  await v.waitForTimeout(4000);
+  assert.equal(await v.evaluate(() => window.__localcast.probes), p2, 'no probes while released');
+  assert.equal(await state(v), 'released');
+  await setVisibility(v, 'visible');
+  await playing(v, 10);
+  await v.waitForTimeout(2500);
+  assert.ok(await v.evaluate((n) => window.__localcast.probes > n, p2), 'probing again');
+  assert.equal(await v.evaluate(() => window.__localcast.curHost), '127.0.0.1:' + mock.port);
+  assert.deepEqual(realErrors(), []);
+});
+
+test('adaptive jitter buffer: jitter raises the target (150, then 250), calm steps it back to 0', async () => {
+  const v = await viewer('?jb_calm_ms=1500&jb_step_ms=300#pin=123456');
+  const infos = [];
+  v.on('console', (m) => { if (/jitter buffer/.test(m.text())) infos.push(m.text()); });
+  await playing(v);
+  const supported = await v.evaluate(() => window.__localcast.jitterSupported);
+  console.log('jitterBufferTarget supported:', supported);
+  assert.equal(await v.evaluate(() => window.__localcast.jitterTarget), 0);
+  if (supported) assert.equal(await v.evaluate(() => window.__localcast.receiverJitterTarget), 0);
+  // Pure decision function.
+  const pure = await v.evaluate(() => {
+    const L = window.__localcast, cfg = { ...L.JB, calmMs: 20000, stepMs: 5000 };
+    let st = L.jbInit(), t = 1e6;
+    const step = (s, dt = 1000) => { t += dt; st = L.jbDecide(st, s, t, cfg); return st.target; };
+    const out = [];
+    for (let i = 0; i < 4; i++) out.push(step({ rttMs: 5, packetsLost: 0, framesDropped: 0 }));
+    out.push(step({ rttMs: 30 }));            // > 2x median but under 40 ms: not jitter
+    out.push(step({ rttMs: 60 }));            // spike -> 150
+    out.push(step({ rttMs: 5, packetsLost: 2 })); // loss -> still 150 (2 of 5)
+    out.push(step({ rttMs: 5, framesDropped: 1 })); // 3 of the last 5 -> 250
+    out.push(step({ rttMs: 5 }, 19000));      // 19 s calm: hold
+    out.push(step({ rttMs: 5 }, 1000));       // 20 s: -50
+    out.push(step({ rttMs: 5 }, 1000));       // within 5 s of the last step: hold
+    out.push(step({ rttMs: 5 }, 4000));       // -50
+    for (let i = 0; i < 3; i++) out.push(step({ rttMs: 5 }, 5000));
+    out.push(step({ rttMs: 5 }, 5000));       // floor 0
+    return out;
+  });
+  assert.deepEqual(pure, [0, 0, 0, 0, 0, 150, 150, 250, 250, 200, 200, 150, 100, 50, 0, 0]);
+  // Injected samples on the live page: loss -> 150, three bad polls -> 250 (never above).
+  const r = await v.evaluate(() => {
+    const L = window.__localcast, base = L.stats.packetsLost || 0, out = [];
+    out.push(L.debugJitter({ packetsLost: base }));
+    out.push(L.debugJitter({ packetsLost: base + 1 }));
+    out.push(L.debugJitter({ packetsLost: base + 3 }));
+    out.push(L.debugJitter({ packetsLost: base + 4 }));
+    out.push(L.debugJitter({ packetsLost: base + 9 }));
+    return { out, recv: L.receiverJitterTarget };
+  });
+  assert.deepEqual(r.out, [0, 150, 150, 250, 250]);
+  if (supported) assert.equal(r.recv, 250, 'receiver.jitterBufferTarget follows');
+  // Calm real polls step it down to 0 again.
+  await v.waitForFunction(() => window.__localcast.jitterTarget === 0, null, { timeout: 20000 });
+  if (supported) assert.equal(await v.evaluate(() => window.__localcast.receiverJitterTarget), 0);
+  assert.ok(infos.some((t) => /0 -> 150 ms \(packets lost/.test(t)), infos.join('\n'));
+  assert.ok(infos.some((t) => /150 -> 250 ms/.test(t)));
+  assert.ok(infos.some((t) => /50 -> 0 ms \(calm\)/.test(t)));
+  assert.equal(await state(v), 'playing');
+  assert.equal((await mockState()).restarts, 0, 'no catch-up restart');
+  assert.deepEqual(errors, []);
+});
