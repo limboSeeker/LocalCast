@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Window background before Compose draws: matches the theme's background. -->
-    <color name="window_background">#FFF6F7FB</color>
+    <color name="window_background">#FFF6F7F8</color>
     <!-- Brand "signal blue": notification accent. -->
     <color name="notif_accent">#FF1E5EFF</color>
 </resources>

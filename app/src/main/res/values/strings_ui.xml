@@ -1,26 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="ui_settings">Settings</string>
+    <string name="ui_back">Back</string>
+    <string name="ui_close">Close</string>
+    <string name="ui_cancel">Cancel</string>
 
     <!-- Idle -->
-    <string name="ui_device_label">This device</string>
-    <string name="ui_start">Start casting</string>
-    <string name="ui_idle_hint">Viewers don\'t need an app, just a browser on the same network</string>
-    <string name="ui_net_wifi_5">Wi-Fi 5\u00A0GHz</string>
-    <string name="ui_net_wifi_6">Wi-Fi 6\u00A0GHz</string>
-    <string name="ui_net_wifi_24">Wi-Fi 2.4\u00A0GHz — may stutter</string>
+    <string name="ui_start">Start</string>
+    <string name="ui_ready_title">Ready to go live</string>
+    <string name="ui_idle_hint">Viewers only need a browser on the same Wi-Fi network</string>
+    <string name="ui_net_wifi_5">Wi-Fi · 5 GHz</string>
+    <string name="ui_net_wifi_6">Wi-Fi · 6 GHz</string>
+    <string name="ui_net_wifi_24">Wi-Fi · 2.4 GHz</string>
     <string name="ui_net_wifi" translatable="false">Wi-Fi</string>
     <string name="ui_net_hotspot">Hotspot</string>
     <string name="ui_net_ethernet" translatable="false">Ethernet</string>
     <string name="ui_net_other">Local network</string>
     <string name="ui_net_none">No network</string>
     <string name="ui_net_cd">Network: %1$s</string>
-    <string name="ui_net_24_hint">For a smooth picture, use Wi-Fi 5\u00A0GHz or this device\'s hotspot</string>
-    <string name="ui_preset_chip_cd">Quality mode: %1$s. Change</string>
-    <string name="ui_steps_title">How to connect</string>
-    <string name="ui_step_1">Tap “Start casting” and allow screen recording</string>
-    <string name="ui_step_2">On another device, scan the QR code or open the address in a browser</string>
-    <string name="ui_step_3">Enter the PIN if the browser asks for it</string>
+    <string name="ui_net_24_hint">2.4 GHz Wi-Fi is often unstable. For a smooth picture, use 5 GHz or this device’s hotspot</string>
+    <string name="ui_preset_chip">Quality: %1$s</string>
+    <string name="ui_preset_chip_action">Change quality</string>
+    <!-- Before the system "share your screen" dialog (Android 14+), shown once. -->
+    <string name="ui_capture_hint_title">Choose “Entire screen”</string>
+    <string name="ui_capture_hint_text">Next, Android asks what to share. Choose “Entire screen”, not a single app — otherwise viewers see a black screen as soon as you switch apps.</string>
+    <string name="ui_capture_hint_ok">Continue</string>
 
     <!-- Progress / error -->
     <string name="ui_status_stopping">Stopping…</string>
@@ -29,90 +33,133 @@
     <string name="ui_retry">Try again</string>
 
     <!-- Live -->
-    <string name="ui_live_badge">LIVE</string>
-    <string name="ui_starting_badge">STARTING</string>
-    <string name="ui_live_duration_cd">Live for %1$s</string>
-    <string name="ui_capture_info">%1$d×%2$d · %3$d\u00A0fps</string>
+    <string name="ui_live_badge">On air</string>
+    <string name="ui_starting_badge">Starting…</string>
+    <string name="ui_paused_badge">Paused</string>
+    <string name="ui_live_duration_cd">On air for %1$s</string>
+    <string name="ui_pause">Pause</string>
     <string name="ui_stop">Stop</string>
-    <string name="ui_connect_hint">Open on another device on the same network</string>
     <string name="ui_waiting_address">Getting the address…</string>
-    <string name="ui_copy">Copy</string>
-    <string name="ui_share">Share</string>
+    <string name="ui_address_label">Address</string>
+    <string name="ui_copy_address">Copy address</string>
     <string name="ui_copied">Address copied</string>
     <string name="ui_share_title">Cast address</string>
+    <string name="ui_share_address">Share address</string>
     <string name="ui_other_addresses">Other addresses</string>
-    <string name="ui_address_with_kind" translatable="false">%1$s — %2$s</string>
-    <string name="ui_kind_wifi" translatable="false">Wi-Fi</string>
-    <string name="ui_kind_hotspot">Hotspot</string>
-    <string name="ui_kind_ethernet" translatable="false">Ethernet</string>
-    <string name="ui_kind_usb" translatable="false">USB</string>
-    <string name="ui_kind_vpn" translatable="false">VPN</string>
-    <string name="ui_kind_other">Other</string>
     <string name="ui_qr_description">QR code with the cast address</string>
-    <string name="ui_qr_caption">Scan with a camera — the PIN fills in automatically</string>
-    <string name="ui_pin_title" translatable="false">PIN</string>
-    <string name="ui_pin_hint">Viewers enter it in the browser</string>
+    <string name="ui_pin_label" translatable="false">PIN</string>
     <string name="ui_pin_cd" translatable="false">PIN: %1$s</string>
     <string name="ui_pin_new">New PIN</string>
-    <string name="ui_pin_disabled">PIN is off — anyone on the network can connect</string>
+    <string name="ui_pin_disabled">PIN is off — anyone on the network can join</string>
     <string name="ui_no_network">No network. Connect to Wi-Fi or turn on this device\'s hotspot</string>
 
-    <!-- Viewers -->
-    <string name="ui_viewers_title">Viewers</string>
-    <plurals name="ui_viewers_count_cd">
-        <item quantity="one">%1$d viewer</item>
-        <item quantity="other">%1$d viewers</item>
+    <!-- Show to viewers (always light, brightness up) -->
+    <string name="ui_show_viewers">Show to viewers</string>
+    <string name="ui_show_short">Show</string>
+    <string name="ui_show_title">Point a camera at the code</string>
+    <string name="ui_show_or_open">or open in a browser</string>
+    <string name="ui_show_brightness">Brightness is up while this is open</string>
+
+    <!-- Paused -->
+    <string name="ui_paused_title">Viewers see a “Paused” card</string>
+    <string name="ui_paused_body">You can enter a password or read notifications. Viewers stay connected.</string>
+    <string name="ui_paused_body_locked">The screen was locked. The broadcast resumes by itself once you unlock it. Viewers stay connected.</string>
+    <string name="ui_resume">Back on air</string>
+    <string name="ui_end_broadcast">End broadcast</string>
+
+    <!-- Broadcast status -->
+    <string name="ui_health_sheet_title">Broadcast status</string>
+    <string name="ui_health_cd">Broadcast status: %1$s</string>
+    <string name="ui_health_open">Open details</string>
+    <string name="ui_health_ok">All good</string>
+    <string name="ui_health_network_title">Network can’t keep up</string>
+    <string name="ui_health_network_body">Quality lowered to %1$s</string>
+    <string name="ui_health_warm_title">Device is getting warm</string>
+    <string name="ui_health_warm_body">Frame rate lowered to %1$d fps</string>
+    <string name="ui_health_hot_title">Device is hot</string>
+    <string name="ui_health_hot_body">Quality lowered. Remove the case or unplug the charger</string>
+    <string name="ui_health_critical_title">Overheating</string>
+    <string name="ui_health_critical_body">The broadcast may stop</string>
+    <string name="ui_health_capacity_title">Device limit reached</string>
+    <plurals name="ui_health_capacity_body">
+        <item quantity="one">%d viewer couldn’t join: no free encoders</item>
+        <item quantity="other">%d viewers couldn’t join: no free encoders</item>
     </plurals>
+    <string name="ui_health_viewer_title">%1$s can’t keep up</string>
+    <string name="ui_health_viewer_body">Delay about %1$d ms</string>
+    <string name="ui_health_latency_title">A viewer can’t keep up</string>
+    <plurals name="ui_metric_viewers">
+        <item quantity="one">viewer</item>
+        <item quantity="other">viewers</item>
+    </plurals>
+    <plurals name="ui_viewers_lite">
+        <item quantity="one">%d lite</item>
+        <item quantity="other">%d lite</item>
+    </plurals>
+    <string name="ui_metric_mbps">Mbps</string>
+    <string name="ui_metric_latency">latency</string>
+    <string name="ui_metric_heat">heat</string>
+    <string name="ui_heat_normal">normal</string>
+    <string name="ui_heat_warm">warm</string>
+    <string name="ui_heat_hot">hot</string>
+    <string name="ui_heat_critical">critical</string>
+    <string name="ui_heat_no_limits">no limits</string>
+    <string name="ui_heat_limited">up to %1$d fps</string>
+    <string name="ui_tile_viewers">Viewers</string>
+    <string name="ui_tile_bandwidth">Bandwidth, Mbps</string>
+    <string name="ui_tile_latency">Worst latency</string>
+    <string name="ui_tile_heat">Heat</string>
+    <string name="ui_encoders_summary">Encoders: hardware %1$d, software %2$d</string>
+    <string name="ui_ratio" translatable="false">%1$s/%2$s</string>
+    <string name="ui_ratio_spaced" translatable="false">%1$s / %2$s</string>
+    <string name="ui_no_value" translatable="false">—</string>
+
+    <!-- Viewers -->
+    <string name="ui_viewers_section">Viewers · %1$d</string>
     <string name="ui_viewers_empty">No one has connected yet</string>
-    <string name="ui_health_good">Good</string>
-    <string name="ui_health_fair">Unstable</string>
-    <string name="ui_health_poor">Poor</string>
-    <string name="ui_health_lost">No connection</string>
-    <string name="ui_health_connecting">Connecting…</string>
+    <string name="ui_viewer_name" translatable="false">%1$s · %2$s</string>
+    <string name="ui_viewer_ok">good</string>
+    <string name="ui_viewer_unstable">unstable</string>
+    <string name="ui_viewer_lost">no connection</string>
+    <string name="ui_viewer_connecting">connecting…</string>
     <string name="ui_browser_chrome" translatable="false">Chrome</string>
     <string name="ui_browser_safari" translatable="false">Safari</string>
     <string name="ui_browser_samsung" translatable="false">Samsung Internet</string>
     <string name="ui_browser_firefox" translatable="false">Firefox</string>
     <string name="ui_browser_edge" translatable="false">Edge</string>
     <string name="ui_browser_other">Browser</string>
-    <string name="ui_encoder_hardware">Hardware encoder</string>
-    <string name="ui_encoder_software">Software encoder</string>
-    <string name="ui_metric_codec">Codec %1$s</string>
-    <string name="ui_metric_fps">%1$s\u00A0fps</string>
-    <string name="ui_metric_bitrate">%1$.1f\u00A0Mbps</string>
-    <string name="ui_metric_latency">Latency ≈ %1$d\u00A0ms</string>
-    <string name="ui_metric_rtt">RTT %1$d\u00A0ms</string>
-    <string name="ui_limit_bandwidth">Limited by network</string>
-    <string name="ui_limit_cpu">Limited by CPU</string>
-
-    <!-- Tips -->
-    <string name="ui_tips_title">Tips for smooth casting</string>
-    <string name="ui_tips_expand">Show tips</string>
-    <string name="ui_tips_collapse">Hide tips</string>
-    <string name="ui_tip_latency">For the lowest latency, use Wi-Fi 5\u00A0GHz or this device\'s hotspot</string>
-    <string name="ui_tip_battery">Turn off battery optimization so the system doesn\'t stop casting (especially on Xiaomi and Samsung)</string>
-    <string name="ui_tip_battery_action">Turn off battery optimization</string>
+    <string name="ui_encoder_hw">hardware</string>
+    <string name="ui_encoder_sw">software</string>
+    <string name="ui_encoder_lite">lite</string>
+    <string name="ui_fps_value">%1$d fps</string>
+    <string name="ui_ms_value">%1$d ms</string>
+    <string name="ui_mbps_value">%1$s Mbps</string>
+    <string name="ui_resolution_p" translatable="false">%1$dp</string>
 
     <!-- Settings -->
-    <string name="ui_set_quality">Cast quality</string>
-    <string name="ui_preset_speed">Speed</string>
-    <string name="ui_preset_speed_spec">720p · 60\u00A0fps</string>
-    <string name="ui_preset_speed_hint">Lowest latency — for games and video</string>
+    <string name="ui_set_quality">Picture quality</string>
+    <string name="ui_preset_speed">Fast</string>
+    <string name="ui_preset_speed_hint">720p, 60 fps. Lowest latency — for video and games.</string>
     <string name="ui_preset_balance">Balanced</string>
-    <string name="ui_preset_balance_spec">1080p · auto</string>
-    <string name="ui_preset_balance_hint">Right for most uses</string>
-    <string name="ui_preset_quality">Quality</string>
-    <string name="ui_preset_quality_spec">Native · 30\u00A0fps</string>
-    <string name="ui_preset_quality_hint">Sharpest text — for documents and slides</string>
+    <string name="ui_preset_balance_hint">1080p, up to 60 fps. The bitrate adapts to the network.</string>
+    <string name="ui_preset_quality">Sharp</string>
+    <string name="ui_preset_quality_hint">Native resolution, 30 fps. Sharpest text — for documents and slides.</string>
     <string name="ui_preset_custom">Custom</string>
-    <string name="ui_preset_custom_hint">Custom mode: %1$s</string>
+    <string name="ui_preset_custom_hint">Custom: %1$s</string>
     <string name="ui_set_summary" translatable="false">%1$s · %2$s · %3$s · %4$s</string>
     <string name="ui_set_summary_fps_auto">auto FPS</string>
-    <string name="ui_set_summary_fps">%1$d\u00A0fps</string>
     <string name="ui_set_summary_bitrate_auto">auto bitrate</string>
+    <string name="ui_set_access">Access</string>
+    <string name="ui_set_require_pin">PIN for viewers</string>
+    <string name="ui_set_require_pin_hint">Without a PIN, anyone on the network can join</string>
+    <string name="ui_set_pause_lock">Pause on lock screen</string>
+    <string name="ui_set_pause_lock_hint">Viewers won’t see your lock screen or notifications</string>
+    <string name="ui_set_general">General</string>
+    <string name="ui_set_theme">Theme</string>
+    <string name="ui_theme_system">System default</string>
+    <string name="ui_theme_light">Light</string>
+    <string name="ui_theme_dark">Dark</string>
     <string name="ui_set_advanced">Advanced</string>
-    <string name="ui_set_advanced_cd_expand">Show advanced settings</string>
-    <string name="ui_set_advanced_cd_collapse">Hide advanced settings</string>
     <string name="ui_set_resolution">Resolution</string>
     <string name="ui_set_res_720" translatable="false">720p</string>
     <string name="ui_set_res_1080" translatable="false">1080p</string>
@@ -121,31 +168,34 @@
     <string name="ui_set_auto">Auto</string>
     <string name="ui_set_fps_30" translatable="false">30</string>
     <string name="ui_set_fps_60" translatable="false">60</string>
-    <string name="ui_set_fps_hint">Auto — 60\u00A0fps if the display and encoder support it, otherwise 30</string>
+    <string name="ui_set_fps_hint">Auto — 60 fps if the display and encoder support it, otherwise 30</string>
     <string name="ui_set_bitrate">Bitrate</string>
     <string name="ui_set_bitrate_auto">Auto</string>
-    <string name="ui_set_bitrate_value">%1$d\u00A0Mbps</string>
-    <string name="ui_set_bitrate_hint">Auto — the bitrate cap follows resolution and frame rate (3–20\u00A0Mbps), and WebRTC lowers it when the network can\'t keep up. A fixed value sets the cap by hand.</string>
+    <string name="ui_set_bitrate_value">%1$d Mbps</string>
+    <string name="ui_set_bitrate_hint">Auto — the bitrate cap follows resolution and frame rate (3–20 Mbps), and WebRTC lowers it when the network can\'t keep up. A fixed value sets the cap by hand.</string>
     <string name="ui_set_priority">Priority</string>
     <string name="ui_set_priority_smooth">Smoothness</string>
     <string name="ui_set_priority_sharp">Sharpness</string>
     <string name="ui_set_priority_smooth_hint">Smoothness — keep the frame rate, lowering resolution if needed</string>
     <string name="ui_set_priority_sharp_hint">Sharpness — keep text sharp, lowering the frame rate if needed</string>
-    <string name="ui_set_require_pin">Require PIN</string>
-    <string name="ui_set_require_pin_hint">Viewers enter a 6-digit code from this device\'s screen</string>
     <string name="ui_set_port">Port</string>
     <string name="ui_set_port_hint">If it\'s busy, the next free one is used</string>
-    <string name="ui_set_port_value" translatable="false">%1$d</string>
+    <string name="ui_set_reliability">Background work</string>
     <string name="ui_set_battery">Battery optimization</string>
     <string name="ui_set_battery_on">On — the system may stop casting</string>
     <string name="ui_set_battery_off">Off — casting won\'t be interrupted</string>
     <string name="ui_set_battery_action">Turn off</string>
+    <string name="ui_xiaomi_title">Xiaomi: allow background work</string>
+    <string name="ui_xiaomi_hint">HyperOS and MIUI may stop the broadcast. In the app settings, turn on Autostart and set the battery saver to “No restrictions”.</string>
+    <string name="ui_xiaomi_action">Open app settings</string>
+    <string name="ui_set_diagnostics">Copy diagnostics</string>
+    <string name="ui_set_diagnostics_hint">Device, encoders and stream figures, for a bug report</string>
+    <string name="ui_set_diagnostics_done">Copied to the clipboard</string>
     <!-- Bilingual on purpose: findable whichever language the app is in. Opens the system per-app
          language screen (Android 13+). -->
     <string name="ui_set_language" translatable="false">Мова / Language</string>
     <!-- Name of the language this resource set is in. -->
     <string name="ui_set_language_current">English</string>
-    <string name="ui_set_about">About</string>
     <string name="ui_about_version" translatable="false">%1$s %2$s</string>
     <string name="ui_about_text">Casts the screen to a browser on the local network over WebRTC. No cloud, no sign-up.</string>
 </resources>

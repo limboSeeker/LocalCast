@@ -13,20 +13,19 @@ enum class Preset(
     val fps: FpsMode,
     val priority: Priority,
     @param:StringRes val title: Int,
-    @param:StringRes val spec: Int,
     @param:StringRes val hint: Int,
 ) {
     SPEED(
         ResolutionMode.P720, FpsMode.FPS_60, Priority.SMOOTH,
-        R.string.ui_preset_speed, R.string.ui_preset_speed_spec, R.string.ui_preset_speed_hint,
+        R.string.ui_preset_speed, R.string.ui_preset_speed_hint,
     ),
     BALANCE(
         ResolutionMode.P1080, FpsMode.AUTO, Priority.SHARP,
-        R.string.ui_preset_balance, R.string.ui_preset_balance_spec, R.string.ui_preset_balance_hint,
+        R.string.ui_preset_balance, R.string.ui_preset_balance_hint,
     ),
     QUALITY(
         ResolutionMode.NATIVE, FpsMode.FPS_30, Priority.SHARP,
-        R.string.ui_preset_quality, R.string.ui_preset_quality_spec, R.string.ui_preset_quality_hint,
+        R.string.ui_preset_quality, R.string.ui_preset_quality_hint,
     ),
     ;
 

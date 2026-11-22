@@ -7,38 +7,41 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
+// System font (Roboto, or the OEM / user font), two weights only: Regular 400 and Medium 500.
+// Bold light-on-dark reads harsher; 500 is dense enough.
 private val Sans = FontFamily.Default
+private val Regular = FontWeight.Normal
+private val Medium = FontWeight.Medium
 
-/** Addresses, PINs and the live timer: fixed-width digits never jump around. */
-val Mono = FontFamily.Monospace
-
-// System font, but a tighter, heavier display/headline end than the M3 default.
-internal val LocalCastTypography = Typography(
-    displayLarge = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 52.sp, lineHeight = 58.sp, letterSpacing = (-0.02).em),
-    displayMedium = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 42.sp, lineHeight = 48.sp, letterSpacing = (-0.02).em),
-    displaySmall = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp, letterSpacing = (-0.01).em),
-    headlineLarge = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 30.sp, lineHeight = 36.sp, letterSpacing = (-0.01).em),
-    headlineMedium = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp, letterSpacing = (-0.005).em),
-    headlineSmall = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
-    titleLarge = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp),
-    titleMedium = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp, letterSpacing = 0.01.em),
-    titleSmall = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.01.em),
-    bodyLarge = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.01.em),
-    bodyMedium = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.01.em),
-    bodySmall = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.02.em),
-    labelLarge = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.01.em),
-    labelMedium = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.03.em),
-    labelSmall = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.04.em),
+private fun style(size: Int, line: Int, weight: FontWeight, tracking: Double = 0.0) = TextStyle(
+    fontFamily = Sans,
+    fontWeight = weight,
+    fontSize = size.sp,
+    lineHeight = line.sp,
+    letterSpacing = tracking.em,
 )
 
-/** Big PIN digits. */
-val PinTextStyle = TextStyle(fontFamily = Mono, fontWeight = FontWeight.Bold, fontSize = 40.sp, lineHeight = 46.sp, letterSpacing = 0.02.em)
+// Scale 44 / 28 / 22 / 18 / 16 / 14 / 12 sp. Nothing below 12 sp; body text not below 14 sp.
+internal val LocalCastTypography = Typography(
+    displayLarge = style(44, 52, Medium, -0.02),
+    displayMedium = style(44, 52, Medium, -0.02),
+    displaySmall = style(44, 52, Medium, -0.02),
+    headlineLarge = style(28, 36, Medium, -0.01),
+    headlineMedium = style(28, 36, Medium, -0.01),
+    headlineSmall = style(28, 36, Medium, -0.01),
+    titleLarge = style(22, 28, Medium, -0.01),
+    titleMedium = style(18, 24, Medium),
+    titleSmall = style(16, 24, Medium),
+    bodyLarge = style(16, 24, Regular),
+    bodyMedium = style(14, 20, Regular),
+    bodySmall = style(12, 16, Regular, 0.01),
+    labelLarge = style(16, 20, Medium),
+    labelMedium = style(14, 20, Medium),
+    labelSmall = style(12, 16, Medium, 0.01),
+)
 
-/** Primary URL / IP. */
-val AddressTextStyle = TextStyle(fontFamily = Mono, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 26.sp)
+/** Tabular figures: the timer, IP, PIN and metrics keep their width as digits change. */
+fun TextStyle.tabular(): TextStyle = copy(fontFeatureSettings = "tnum")
 
-/** Secondary addresses, viewer IPs. */
-val AddressSmallTextStyle = TextStyle(fontFamily = Mono, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp)
-
-/** Upper-case section labels ("LIVE", "PIN"). */
-val OverlineTextStyle = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.08.em)
+/** PIN digits: tabular and slightly opened up; the gap between triads is a real space. */
+fun TextStyle.pin(): TextStyle = copy(fontFeatureSettings = "tnum", letterSpacing = 0.04.em)
