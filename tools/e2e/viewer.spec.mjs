@@ -392,3 +392,129 @@ test('hidden while in picture-in-picture keeps playing; leaving PiP in the backg
   await playing(v, 10);
   assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
 });
+
+// Emulates fullscreen the way the page reads it (fullscreenElement / webkitFullscreenElement) and fires the change event.
+const setFullscreen = (page, on) => page.evaluate((on) => {
+  const el = on ? document.getElementById('stage') : null;
+  for (const k of ['fullscreenElement', 'webkitFullscreenElement']) Object.defineProperty(document, k, { configurable: true, get: () => el });
+  document.dispatchEvent(new Event('fullscreenchange'));
+}, on);
+
+test('hidden while in fullscreen keeps playing; leaving fullscreen in the background releases', async () => {
+  const v = await viewer('?hide_ms=1000#pin=123456');
+  await playing(v);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  await setFullscreen(v, true);
+  await setVisibility(v, 'hidden');
+  await v.waitForTimeout(3000); // three times the threshold
+  assert.equal(await state(v), 'playing');
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc && !window.__localcast.released));
+  assert.equal((await mockState()).byes, 0);
+  // Esc on the covered window: still hidden, no longer fullscreen -> the countdown starts again and releases.
+  await setFullscreen(v, false);
+  assert.equal(await v.evaluate(() => window.__localcast.released), false, 'not at once');
+  await v.waitForFunction(() => window.__localcast.released, null, { timeout: 5000 });
+  assert.equal((await mockState()).byes, 1);
+  await setVisibility(v, 'visible');
+  await playing(v, 10);
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
+});
+
+test('keep=1 (query or hash) never releases a hidden tab and survives a reload', async () => {
+  const q = await viewer('?keep=1');
+  await q.waitForFunction(() => window.__localcast.state === 'pin');
+  assert.equal(await q.evaluate(() => window.__localcast.keep), true, '?keep=1');
+  await q.close();
+  const v = await viewer('?hide_ms=1000#pin=123456&keep=1');
+  await playing(v);
+  assert.equal(await v.evaluate(() => location.hash), '');
+  assert.equal(await v.evaluate(() => window.__localcast.keep), true, '#keep=1');
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  await setVisibility(v, 'hidden');
+  await v.waitForTimeout(3000);
+  assert.equal(await state(v), 'playing');
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc && !window.__localcast.released));
+  // Shown again: the same connection, nothing to rejoin.
+  assert.equal(await setVisibility(v, 'visible'), 'playing');
+  const s = await mockState();
+  assert.equal(s.byes, 0);
+  assert.equal(s.joins, 1);
+  // The hash is gone after load; keep is remembered for the tab and survives a reconnect via reload.
+  await v.reload();
+  await playing(v, 10);
+  assert.equal(await v.evaluate(() => window.__localcast.keep), true, 'keep after reload');
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
+});
+
+const HIGH = { jitterBufferMs: 650, latencyMs: 120, latencyEstimated: false };
+const GOOD = { jitterBufferMs: 30, latencyMs: 90, latencyEstimated: false };
+// Feeds samples synchronously (no real poll can interleave) and returns the catch-up counters right after.
+const feed = (page, samples) => page.evaluate((list) => {
+  for (const s of list) window.__localcast.debugStats(s);
+  return { catchUps: window.__localcast.catchUps, run: window.__localcast.catchUpRun, state: window.__localcast.state };
+}, samples);
+
+test('latency catch-up: 5 polls of a high jitter buffer -> one restart; a second burst within the cooldown -> none', async () => {
+  const v = await viewer('#pin=123456');
+  const infos = [];
+  v.on('console', (m) => { if (/catch-up/.test(m.text())) infos.push(m.text()); });
+  await playing(v);
+  assert.equal(await v.evaluate(() => window.__localcast.CATCHUP_COOLDOWN_MS), 60000);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  const pcs = await phone.evaluate(() => window.pcs);
+  const r1 = await feed(v, Array(5).fill(HIGH));
+  assert.equal(r1.catchUps, 1);
+  assert.equal(r1.state, 'reconnecting');
+  await v.waitForFunction(() => window.__localcast.pc && window.__localcast.pc !== window.__oldpc && window.__localcast.state === 'playing'
+    && window.__localcast.stats && window.__localcast.stats.framesDecoded > 10, null, { timeout: 20000 });
+  let s = await mockState();
+  assert.equal(s.restarts, 1, 'one restart sent');
+  assert.equal(s.joins, 1, 'same WebSocket');
+  assert.equal(await phone.evaluate(() => window.pcs), pcs + 1, 'phone made one new PeerConnection');
+  assert.equal(infos.length, 1);
+  assert.match(infos[0], /650\/650\/650\/650\/650 ms > 400/);
+  // Second burst right away: the run fills up (so the gate let it through) but the cooldown holds the restart.
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  const r2 = await feed(v, Array(6).fill(HIGH));
+  assert.equal(r2.catchUps, 1);
+  assert.equal(r2.run, 5);
+  await v.waitForTimeout(2000);
+  s = await mockState();
+  assert.equal(s.restarts, 1, 'no second restart');
+  assert.equal(await phone.evaluate(() => window.pcs), pcs + 1);
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc));
+  assert.equal(await state(v), 'playing');
+  assert.deepEqual(errors, []);
+});
+
+test('latency catch-up: a single spike, estimated latency or a paused cast do not restart', async () => {
+  const v = await viewer('#pin=123456');
+  await playing(v);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  // Spike, good sample, then only 4 bad in a row.
+  let r = await feed(v, [HIGH, GOOD, HIGH, HIGH, HIGH, HIGH]);
+  assert.deepEqual([r.catchUps, r.run], [0, 4]);
+  // An estimated latency never counts (it is a sum of parts, not a measurement); a measured one does.
+  r = await feed(v, [GOOD, ...Array(6).fill({ jitterBufferMs: 40, latencyMs: 2000, latencyEstimated: true })]);
+  assert.deepEqual([r.catchUps, r.run], [0, 0]);
+  // Pure decision function.
+  const pure = await v.evaluate(() => {
+    const f = window.__localcast.shouldCatchUp, cfg = { jb: 400, lat: 800, n: 5, cooldown: 60000 }, now = 1e6;
+    const bad = Array(5).fill({ jitterBufferMs: 500 }), lat = Array(5).fill({ jitterBufferMs: 20, latencyMs: 900, latencyEstimated: false });
+    return [f(bad, now, 0, cfg), f(bad.slice(1), now, 0, cfg), f(bad, now, now - 59000, cfg), f(bad, now, now - 60000, cfg),
+      f(lat, now, 0, cfg), f([...bad.slice(1), { jitterBufferMs: 400 }], now, 0, cfg)];
+  });
+  assert.deepEqual(pure, [true, false, false, true, true, false]);
+  // While paused the run never builds up.
+  await post('/mock/pause?on=1');
+  await v.waitForFunction(() => window.__localcast.paused);
+  r = await feed(v, Array(6).fill(HIGH));
+  assert.deepEqual([r.catchUps, r.run], [0, 0]);
+  await post('/mock/pause?on=0');
+  await v.waitForFunction(() => !window.__localcast.paused);
+  await v.waitForTimeout(1500);
+  assert.equal((await mockState()).restarts, 0);
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc));
+  assert.equal(await state(v), 'playing');
+  assert.deepEqual(errors, []);
+});
