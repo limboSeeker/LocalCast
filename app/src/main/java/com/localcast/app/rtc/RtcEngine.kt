@@ -122,6 +122,12 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private var settings = StreamSettings()
     private var contentSize: CaptureSize? = null
     private var currentSize: CaptureSize? = null
+
+    /** Pixels of the capture (engine thread). */
+    internal val capturePixels: Int get() = currentSize?.pixels?.toInt() ?: 0
+
+    /** A/B switches, read when a broadcast starts (debug builds: adb setprop, see [DebugKnobs]). */
+    @Volatile internal var fpsByBitrate = true
     private var currentFps = 0
     private var statsTask: ScheduledFuture<*>? = null
     private var released = false
@@ -136,6 +142,23 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                     Log.e(TAG, "engine task failed", t)
                 }
             }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            Log.w(TAG, "engine already shut down")
+        }
+    }
+
+    /** Like [post], after [delayMs]. */
+    fun postDelayed(delayMs: Long, block: () -> Unit) {
+        if (executor.isShutdown) return
+        try {
+            executor.schedule({
+                if (released) return@schedule
+                try {
+                    block()
+                } catch (t: Throwable) {
+                    Log.e(TAG, "engine task failed", t)
+                }
+            }, delayMs, TimeUnit.MILLISECONDS)
         } catch (e: java.util.concurrent.RejectedExecutionException) {
             Log.w(TAG, "engine already shut down")
         }
@@ -220,6 +243,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
         val egl = EglBase.create().also { eglBase = it }
         val guard = DebugKnobs.int("guard", 1) != 0
+        fpsByBitrate = DebugKnobs.int("fps_by_bitrate", 1) != 0
+        TunedVideoEncoderFactory.minKeyFrameIntervalMs = DebugKnobs.int("key_interval_ms", 1000)
+        val trials = fieldTrials(DebugKnobs.int("bwe_trials", DEFAULT_BWE_TRIALS))
         val encoders = TunedVideoEncoderFactory(egl.eglBaseContext, encoderListener, guard).also { encoderFactory = it }
         val probe = encoders.hardwareH264Name?.let(EncoderProbe::probe)
         encoderProbe = probe
@@ -240,7 +266,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 // hotspot's ap0/swlan0) — and we never need network switching on a LAN.
                 disableNetworkMonitor = true
             })
-            .setFieldTrials(FIELD_TRIALS)
+            .setFieldTrials(trials)
             .setAudioDeviceModule(adm)
             .setVideoEncoderFactory(encoders)
             .setVideoDecoderFactory(SoftwareVideoDecoderFactory())
@@ -358,8 +384,15 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         if (deviceHasHardware()) peers.values.count { it.softwareEncoder } else peers.size
 
     /** Hardware encoders running plus hardware viewers still connecting (their encoder starts later). */
-    private fun hardwareInUse(): Int =
-        TunedVideoEncoderFactory.getLiveHardwareEncoders() + peers.values.count { !it.softwareEncoder && it.isStarting }
+    /**
+     * Hardware encoders taken or about to be taken. Every hardware viewer holds (or will hold) one;
+     * counting live encoders plus connecting viewers counted a viewer whose encoder already started
+     * twice and turned others away as busy. The live count also covers encoders of closing viewers.
+     */
+    private fun hardwareInUse(): Int = maxOf(
+        TunedVideoEncoderFactory.getLiveHardwareEncoders(),
+        peers.values.count { !it.softwareEncoder },
+    )
 
     private fun admission(): LoadPolicy.Tier = LoadPolicy.admit(
         hardwareOffered = encoderFactory?.isH264Offered == true,
@@ -689,10 +722,32 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
          * - ForceSendPlayoutDelay: tells the browser min=0/max=100 ms playout delay, i.e. render frames
          *   as soon as they are decoded instead of growing the jitter buffer after a burst.
          */
-        private const val FIELD_TRIALS =
+        private const val BASE_FIELD_TRIALS =
             "WebRTC-ProbingScreenshareBwe/Disabled/" +
                 "WebRTC-Video-Pacing/factor:2.5,max_delay:100ms/" +
                 "WebRTC-ForceSendPlayoutDelay/min_ms:0,max_ms:100/"
+
+        /**
+         * Bandwidth-estimator trials, a bit mask for A/B on a device (`debug.localcast.bwe_trials`).
+         * Off by default: not yet measured on a quiet network (the test Wi-Fi was saturated).
+         */
+        private const val TRIAL_ALR_PROBING = 1
+        private const val TRIAL_TRENDLINE = 2
+        private const val TRIAL_RAPID_RECOVERY = 4
+        private const val DEFAULT_BWE_TRIALS = 0
+
+        /**
+         * - ALR probing: while the screen is static (application-limited) probe at 2x the estimate
+         *   every 2 s, so an estimate dropped by a Wi-Fi delay spike climbs back within seconds.
+         * - Trendline: sort packets by arrival and cap the delay slope by the first/last packets,
+         *   so Wi-Fi aggregation bursts are not read as a growing queue.
+         * - Rapid recovery: allow the estimate to rise faster after a drop.
+         */
+        private fun fieldTrials(mask: Int): String = BASE_FIELD_TRIALS +
+            (if (mask and TRIAL_ALR_PROBING != 0) "WebRTC-Bwe-AlrProbing/Enabled/" +
+                "WebRTC-Bwe-ProbingConfiguration/alr_interval:2s,alr_scale:2/" else "") +
+            (if (mask and TRIAL_TRENDLINE != 0) "WebRTC-Bwe-TrendlineEstimatorSettings/sort:true,cap:true/" else "") +
+            (if (mask and TRIAL_RAPID_RECOVERY != 0) "WebRTC-BweRapidRecoveryExperiment/Enabled/" else "")
         @Volatile private var webRtcInitialized = false
 
         private fun ensureWebRtcInitialized(context: Context) {

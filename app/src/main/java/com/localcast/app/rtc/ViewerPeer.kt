@@ -14,6 +14,7 @@ import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.RTCStats
 import org.webrtc.RTCStatsReport
+import org.webrtc.RtpParameters
 import org.webrtc.RtpSender
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
@@ -48,6 +49,13 @@ internal class ViewerPeer(
     /** Stats showed this viewer on the hardware H.264 encoder (engine thread). */
     var hardwareConfirmed = false
 
+    /**
+     * Frame-rate cap from the encoder's current target ("sharpness first" only): a narrow link gets
+     * fewer, readable frames instead of blur. Null = the profile's frame rate (engine thread).
+     */
+    private var fpsCap: Int? = null
+    private var fpsRiseVotes = 0
+
     /** ICE/DTLS connected (engine thread). */
     val isConnected: Boolean get() = connected
 
@@ -70,6 +78,8 @@ internal class ViewerPeer(
         remoteDescriptionSet = false
         hardwareConfirmed = false
         everConnected = false
+        fpsCap = null
+        fpsRiseVotes = 0
         pendingRemoteIce.clear()
 
         val peer = engine.factory.createPeerConnection(engine.rtcConfiguration(), Observer(gen))
@@ -115,11 +125,12 @@ internal class ViewerPeer(
             val params = s.parameters
             params.degradationPreference = p.degradation
             val maxBps = if (softwareEncoder) share.liteBps else share.fullBps
+            // Software VP8 at full size would eat the CPU the capture pipeline needs.
+            val profileFps = if (softwareEncoder) p.liteFps else p.fps
             params.encodings.forEach { e ->
                 e.maxBitrateBps = maxBps
                 e.minBitrateBps = CaptureFormat.MIN_BITRATE_BPS
-                // Software VP8 at full size would eat the CPU the capture pipeline needs.
-                e.maxFramerate = if (softwareEncoder) p.liteFps else p.fps
+                e.maxFramerate = fpsCap?.coerceAtMost(profileFps) ?: profileFps
                 e.scaleResolutionDownBy = if (softwareEncoder) p.liteScale else 1.0
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
@@ -160,10 +171,26 @@ internal class ViewerPeer(
         if (candidate.candidate.isBlank()) return@post // end-of-candidates marker
         val ice = IceCandidate(candidate.sdpMid ?: "0", candidate.sdpMLineIndex, candidate.candidate)
         val peer = pc ?: return@post
-        if (remoteDescriptionSet) peer.addIceCandidate(ice) else pendingRemoteIce.add(ice)
+        if (remoteDescriptionSet) {
+            peer.addIceCandidate(ice)
+        } else if (pendingRemoteIce.size < MAX_PENDING_ICE) {
+            pendingRemoteIce.add(ice)
+        }
     }
 
+    /** Renegotiates after [delayMs] if generation [gen] is still the current one and not connected. */
+    private fun renegotiateIfStill(gen: Int, delayMs: Long) = engine.postDelayed(delayMs) {
+        if (closed || gen != generation || connected) return@postDelayed
+        Log.i(TAG, "$viewerId: connection lost, renegotiating")
+        negotiate()
+    }
+
+    private var lastRestartMs = 0L
+
     override fun restart() = engine.post {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRestartMs < MIN_RESTART_INTERVAL_MS) return@post // each one builds a PeerConnection
+        lastRestartMs = now
         Log.i(TAG, "$viewerId: restart requested by viewer")
         connected = false
         engine.onPeerConnectionState(viewerId, false)
@@ -328,8 +355,34 @@ internal class ViewerPeer(
                 sendDelayMs = sendDelayMs,
             ),
         )
+        adaptFrameRate((m["targetBitrate"] as? Number)?.toInt())
         // Last: this may turn the viewer away (closes the peer).
         engine.onPeerEncoder(this, codec, hardware)
+    }
+
+    /**
+     * Sharpness first: follows the encoder target with a frame-rate cap ([LoadPolicy.fpsForBitrate]).
+     * Lowers at once, raises after two polls in a row (4 s) so a probing spike doesn't flap it.
+     */
+    private fun adaptFrameRate(targetBps: Int?) {
+        val p = engine.sendProfile
+        if (!engine.fpsByBitrate || softwareEncoder || targetBps == null ||
+            p.degradation != RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+        ) {
+            if (fpsCap != null) { fpsCap = null; applySendParameters() }
+            return
+        }
+        val wanted = LoadPolicy.fpsForBitrate(targetBps, engine.capturePixels, p.fps)
+        val current = fpsCap ?: p.fps
+        when {
+            wanted < current -> fpsRiseVotes = 0
+            wanted > current -> if (++fpsRiseVotes < 2) return
+            else -> { fpsRiseVotes = 0; return }
+        }
+        fpsRiseVotes = 0
+        fpsCap = wanted.takeIf { it < p.fps }
+        Log.i(DIAG_TAG, "$viewerId fps cap $current -> $wanted at target=${targetBps / 1000}kbps")
+        applySendParameters()
     }
 
     private fun disposePeerConnection() {
@@ -367,6 +420,14 @@ internal class ViewerPeer(
                     engine.onPeerConnectionState(viewerId, nowConnected)
                 }
                 if (nowConnected) engine.onViewerConnected()
+                // A dead PeerConnection keeps its hardware encoder: other viewers would be turned
+                // away as busy. Renegotiate over the (still open) WebSocket; a gone viewer's socket
+                // times out and closes the session.
+                when (newState) {
+                    PeerConnection.PeerConnectionState.FAILED -> renegotiateIfStill(gen, 0)
+                    PeerConnection.PeerConnectionState.DISCONNECTED -> renegotiateIfStill(gen, DISCONNECTED_GRACE_MS)
+                    else -> Unit
+                }
             }
         }
 
@@ -398,6 +459,10 @@ internal class ViewerPeer(
     }
 
     private companion object {
+        /** A DISCONNECTED PeerConnection that does not come back within this is renegotiated. */
+        const val DISCONNECTED_GRACE_MS = 10_000L
+        const val MIN_RESTART_INTERVAL_MS = 1_000L
+        const val MAX_PENDING_ICE = 64
         const val TAG = "LocalCast/Peer"
         const val DIAG_TAG = "LocalCast/Diag"
         const val STREAM_ID = "localcast"

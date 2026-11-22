@@ -58,6 +58,14 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   private static final AtomicInteger liveHardwareEncoders = new AtomicInteger();
   private static final AtomicInteger encoderSerial = new AtomicInteger();
 
+  /**
+   * Keyframe requests (PLI after a loss) closer than this to the previous keyframe are encoded as
+   * delta frames. A keyframe of a screen is 10–30x a delta frame: on a lossy Wi-Fi link each one
+   * caused more loss and the next PLI (13 PLIs and 5 keyframes in 30 s of scrolling on a tablet).
+   * The browser repeats its request while it still needs a keyframe. 0 = no throttling.
+   */
+  public static volatile int minKeyFrameIntervalMs = 1000;
+
   public TunedVideoEncoderFactory(EglBase.Context sharedContext, @Nullable Listener listener) {
     this(sharedContext, listener, /* guardEnabled= */ true);
   }
@@ -205,6 +213,8 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
 
     @Override
     public VideoCodecStatus initEncode(Settings settings, Callback callback) {
+      // A (re)initialised encoder starts with a keyframe of its own; let the next request through.
+      anyKeyFrame = false;
       // Count this encoder before the MediaCodec init: viewers that initialise in parallel then see
       // each other, so one failure (e.g. out of hardware slots) never disables H.264 for everyone.
       if (!live) {
@@ -231,9 +241,33 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
       return delegate.release();
     }
 
+    private long lastKeyFrameNs;
+    private boolean anyKeyFrame;
+
     @Override
     public VideoCodecStatus encode(VideoFrame frame, EncodeInfo info) {
+      if (info != null && requestsKeyFrame(info)) {
+        long now = System.nanoTime();
+        long minNs = minKeyFrameIntervalMs * 1_000_000L;
+        if (anyKeyFrame && minNs > 0 && now - lastKeyFrameNs < minNs) {
+          info = DELTA_ONLY;
+        } else {
+          anyKeyFrame = true;
+          lastKeyFrameNs = now;
+        }
+      }
       return delegate.encode(frame, info);
+    }
+
+    private static final EncodeInfo DELTA_ONLY =
+        new EncodeInfo(new EncodedImage.FrameType[] {EncodedImage.FrameType.VideoFrameDelta});
+
+    private static boolean requestsKeyFrame(EncodeInfo info) {
+      if (info.frameTypes == null) return false;
+      for (EncodedImage.FrameType type : info.frameTypes) {
+        if (type == EncodedImage.FrameType.VideoFrameKey) return true;
+      }
+      return false;
     }
 
     @Override

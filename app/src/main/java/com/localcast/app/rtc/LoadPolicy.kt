@@ -102,6 +102,26 @@ object LoadPolicy {
         return if (othersWatching == 0) start else min(start, JOIN_START_BPS)
     }
 
+    /** Frame-rate steps of [fpsForBitrate], so the cap moves in visible steps, not every poll. */
+    private val FPS_STEPS = intArrayOf(10, 15, 20, 30, 45, 60)
+
+    /** Bits per pixel per frame that keep scrolling text readable in H.264 screen content. */
+    const val SHARP_BITS_PER_PIXEL = 0.05
+
+    /**
+     * Frame rate a "sharpness first" stream should use at [targetBps]: with a narrow link, fewer
+     * frames at a readable quality instead of [maxFps] frames of blur. Measured on a tablet over
+     * busy 2.4 GHz Wi-Fi: the estimate fell to 0.3 Mbit/s (the link really carried ~2.7 Mbit/s;
+     * a forced floor of 2 Mbit/s made it worse: seconds of delay) and the encoder kept 38 fps at
+     * qp 42–51. Never below the lowest step, never above [maxFps].
+     */
+    fun fpsForBitrate(targetBps: Int, pixels: Int, maxFps: Int): Int {
+        if (pixels <= 0 || targetBps <= 0) return maxFps
+        val affordable = targetBps / (pixels * SHARP_BITS_PER_PIXEL)
+        val step = FPS_STEPS.lastOrNull { it <= affordable } ?: FPS_STEPS.first()
+        return min(step, maxFps)
+    }
+
     /** scaleResolutionDownBy for a lite stream of a [width]x[height] capture. */
     fun liteScale(width: Int, height: Int): Double = max(1.0, max(width, height) / LITE_LONG_SIDE.toDouble())
 

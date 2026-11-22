@@ -88,4 +88,17 @@ class LoadPolicyTest {
         assertEquals(15, LoadPolicy.liteFps(30, Level.WARM))
         assertEquals(10, LoadPolicy.liteFps(10, Level.NORMAL))
     }
+
+    @Test
+    fun narrowLinkLowersFrameRateNotSharpness() {
+        val p720 = 720 * 1152
+        val p1080 = 1080 * 1728
+        assertEquals(10, LoadPolicy.fpsForBitrate(300_000, p720, 60))
+        assertEquals(20, LoadPolicy.fpsForBitrate(1_000_000, p720, 60))
+        assertEquals(45, LoadPolicy.fpsForBitrate(2_000_000, p720, 60))
+        assertEquals(20, LoadPolicy.fpsForBitrate(2_000_000, p1080, 60))
+        assertEquals(60, LoadPolicy.fpsForBitrate(8_000_000, p1080, 60))
+        assertEquals(30, LoadPolicy.fpsForBitrate(8_000_000, p1080, 30))
+        assertEquals(60, LoadPolicy.fpsForBitrate(0, p1080, 60))
+    }
 }
