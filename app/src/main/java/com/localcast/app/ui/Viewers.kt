@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -59,6 +60,23 @@ fun sortWorstFirst(viewers: List<ViewerInfo>, captureFps: Int?): List<ViewerInfo
             .thenByDescending { it.viewer?.latencyMs ?: 0.0 },
     )
 
+/** Tabs and browsers of one device (same address, same device in the user agent), worst stream first. */
+class ViewerGroup(val members: List<ViewerInfo>) {
+    init {
+        require(members.isNotEmpty())
+    }
+
+    /** The worst stream: the group is shown with its stats. */
+    val lead: ViewerInfo get() = members.first()
+    val streams: Int get() = members.size
+}
+
+private fun deviceKey(v: ViewerInfo): Pair<String, String?> = v.remoteAddress to deviceFromUserAgent(v.userAgent)
+
+/** One entry per device, worst device first (by its worst stream). */
+fun groupByDevice(viewers: List<ViewerInfo>, captureFps: Int?): List<ViewerGroup> =
+    sortWorstFirst(viewers, captureFps).groupBy(::deviceKey).values.map(::ViewerGroup)
+
 private fun browserRes(ua: String?): Int {
     val s = ua ?: return R.string.ui_browser_other
     return when {
@@ -98,6 +116,27 @@ fun viewerName(v: ViewerInfo): String {
     return if (device != null) stringResource(R.string.ui_viewer_name, device, browser) else browser
 }
 
+/** "Pixel 9 · 3 tabs" for several streams of one device, otherwise [viewerName]. */
+@Composable
+fun groupName(g: ViewerGroup): String {
+    if (g.streams == 1) return viewerName(g.lead)
+    val device = deviceFromUserAgent(g.lead.userAgent) ?: viewerName(g.lead)
+    return stringResource(R.string.ui_viewer_name, device, pluralStringResource(R.plurals.ui_viewer_tabs, g.streams, g.streams))
+}
+
+/** "Viewers · 3", or "Viewers · 1 device, 3 streams" when some device has several. */
+@Composable
+fun viewersSection(viewers: List<ViewerInfo>, groups: List<ViewerGroup>): String =
+    if (groups.size == viewers.size) {
+        stringResource(R.string.ui_viewers_section, viewers.size)
+    } else {
+        stringResource(
+            R.string.ui_viewers_section_devices,
+            pluralStringResource(R.plurals.ui_devices_count, groups.size, groups.size),
+            pluralStringResource(R.plurals.ui_streams_count, viewers.size, viewers.size),
+        )
+    }
+
 @Composable
 private fun healthColor(h: Health): Color {
     val brand = MaterialTheme.brand
@@ -123,9 +162,10 @@ private fun ViewerInfo.fps(): Int? = (viewer?.fps ?: sender?.fps)?.roundToInt()
 
 /** One-line row (56 dp): dot, name, and on the right the frame rate or what's wrong. */
 @Composable
-fun ViewerRow(v: ViewerInfo, captureFps: Int?, modifier: Modifier = Modifier) {
+fun ViewerRow(g: ViewerGroup, captureFps: Int?, modifier: Modifier = Modifier) {
+    val v = g.lead
     val health = viewerHealth(v, captureFps)
-    val name = viewerName(v)
+    val name = groupName(g)
     val fps = v.fps()
     val fpsText = fps?.let { stringResource(R.string.ui_fps_value, it) }
     val right = when (health) {
@@ -165,7 +205,8 @@ fun ViewerRow(v: ViewerInfo, captureFps: Int?, modifier: Modifier = Modifier) {
 
 /** Two-line row for the details: codec · encoder · resolution · bitrate; fps and latency on the right. */
 @Composable
-fun ViewerDetailRow(v: ViewerInfo, captureFps: Int?, deviceHasHardware: Boolean, modifier: Modifier = Modifier) {
+fun ViewerDetailRow(g: ViewerGroup, captureFps: Int?, deviceHasHardware: Boolean, modifier: Modifier = Modifier) {
+    val v = g.lead
     val health = viewerHealth(v, captureFps)
     val s = v.sender
     val vs = v.viewer
@@ -191,7 +232,7 @@ fun ViewerDetailRow(v: ViewerInfo, captureFps: Int?, deviceHasHardware: Boolean,
     val latency = vs?.latencyMs?.roundToInt()
     val warn = MaterialTheme.brand.warnText
     val normal = MaterialTheme.colorScheme.onSurfaceVariant
-    val name = viewerName(v)
+    val name = groupName(g)
     val cd = listOfNotNull(
         name,
         healthWord(health),
@@ -234,9 +275,9 @@ fun ViewerDetailRow(v: ViewerInfo, captureFps: Int?, deviceHasHardware: Boolean,
 
 /** List of one-line rows separated by hairlines, inside a panel. */
 @Composable
-fun ViewerList(viewers: List<ViewerInfo>, captureFps: Int?, modifier: Modifier = Modifier) {
+fun ViewerList(groups: List<ViewerGroup>, captureFps: Int?, modifier: Modifier = Modifier) {
     Panel(modifier) {
-        if (viewers.isEmpty()) {
+        if (groups.isEmpty()) {
             Text(
                 stringResource(R.string.ui_viewers_empty),
                 style = MaterialTheme.typography.bodyMedium,
@@ -244,9 +285,9 @@ fun ViewerList(viewers: List<ViewerInfo>, captureFps: Int?, modifier: Modifier =
                 modifier = Modifier.padding(16.dp),
             )
         }
-        viewers.forEachIndexed { i, v ->
+        groups.forEachIndexed { i, g ->
             if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ViewerRow(v, captureFps)
+            ViewerRow(g, captureFps)
         }
     }
 }

@@ -89,10 +89,13 @@ private fun healthMessage(state: CastState, h: BroadcastHealth): HealthMessage {
         )
         h.issue == HealthIssue.NETWORK -> {
             val lowest = state.viewers.filter { it.connected }.mapNotNull { it.sender?.height }.minOrNull()
+            val quality = lowest?.let { stringResource(R.string.ui_health_network_body, stringResource(R.string.ui_resolution_p, it)) }
+            // The casting device on 2.4 GHz is the usual cause, and the one the user can fix.
+            val hint = if (wifiBand(h.wifiMhz) == NetworkKind.WIFI_24) stringResource(R.string.ui_health_network_24) else null
             HealthMessage(
                 Severity.WARN,
                 stringResource(R.string.ui_health_network_title),
-                lowest?.let { stringResource(R.string.ui_health_network_body, stringResource(R.string.ui_resolution_p, it)) },
+                listOfNotNull(quality, hint).joinToString("\n").ifEmpty { null },
             )
         }
         h.thermalLevel == 2 -> HealthMessage(
@@ -182,14 +185,25 @@ private fun heatWord(level: Int): String = stringResource(
 private fun BroadcastHealth.linkBusy(): Boolean =
     viewers > 1 && linkKbps > 0 && totalKbps >= HealthPolicy.NETWORK_BUSY_SHARE * linkKbps
 
+/** Devices, or the service's viewer count when every device has one stream. */
+private fun shownViewers(h: BroadcastHealth, devices: Int, streams: Int): Int = if (devices < streams) devices else h.viewers
+
+/** "3 streams" when some device has several, and "1 lite". */
 @Composable
-private fun metrics(h: BroadcastHealth): List<Metric> {
+private fun viewersExtra(h: BroadcastHealth, devices: Int, streams: Int): String? = listOfNotNull(
+    if (devices < streams) pluralStringResource(R.plurals.ui_streams_count, streams, streams) else null,
+    if (h.liteViewers > 0) pluralStringResource(R.plurals.ui_viewers_lite, h.liteViewers, h.liteViewers) else null,
+).joinToString(", ").ifEmpty { null }
+
+@Composable
+private fun metrics(h: BroadcastHealth, devices: Int, streams: Int): List<Metric> {
     val dash = stringResource(R.string.ui_no_value)
+    val shown = shownViewers(h, devices, streams)
     return listOf(
         Metric(
-            h.viewers.toString(),
-            pluralStringResource(R.plurals.ui_metric_viewers, h.viewers),
-            if (h.liteViewers > 0) pluralStringResource(R.plurals.ui_viewers_lite, h.liteViewers, h.liteViewers) else null,
+            shown.toString(),
+            pluralStringResource(R.plurals.ui_metric_viewers, shown),
+            viewersExtra(h, devices, streams),
             warn = false,
         ),
         Metric(
@@ -270,16 +284,28 @@ fun HealthCard(
     ) {
         StatusLine(msg, neutral, chevron = true)
         if (state.viewers.isNotEmpty()) {
-            MetricsGrid(metrics(h), forceGrid = grid)
-            sortWorstFirst(state.viewers, captureFps).take(maxViewers).forEach { v ->
+            val groups = groupByDevice(state.viewers, captureFps)
+            MetricsGrid(metrics(h, groups.size, state.viewers.size), forceGrid = grid)
+            groups.take(maxViewers).forEach { g ->
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ViewerRow(v, captureFps)
+                ViewerRow(g, captureFps)
             }
         }
     }
 }
 
 // ---------- Details sheet ----------
+
+/** The casting device's own link: "Wi-Fi · 5 GHz", or "Hotspot or unknown". */
+@Composable
+private fun linkName(wifiMhz: Int?): String = stringResource(
+    when (wifiBand(wifiMhz)) {
+        NetworkKind.WIFI_24 -> R.string.ui_net_wifi_24
+        NetworkKind.WIFI_5 -> R.string.ui_net_wifi_5
+        NetworkKind.WIFI_6 -> R.string.ui_net_wifi_6
+        else -> R.string.ui_net_unknown
+    },
+)
 
 @Composable
 private fun Tile(label: String, value: String, sub: String?, modifier: Modifier = Modifier, valueWarn: Boolean = false, extra: @Composable (() -> Unit)? = null) {
@@ -326,6 +352,7 @@ fun HealthDetails(state: CastState) {
     val connected = state.viewers.filter { it.connected }
     val hw = connected.count { it.sender?.hardwareEncoder == true }
     val sw = connected.count { it.sender?.hardwareEncoder == false }
+    val groups = groupByDevice(state.viewers, captureFps)
     Column(
         Modifier
             .fillMaxWidth()
@@ -349,15 +376,15 @@ fun HealthDetails(state: CastState) {
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Tile(
                     stringResource(R.string.ui_tile_viewers),
-                    h.viewers.toString(),
-                    if (h.liteViewers > 0) pluralStringResource(R.plurals.ui_viewers_lite, h.liteViewers, h.liteViewers) else null,
+                    shownViewers(h, groups.size, state.viewers.size).toString(),
+                    viewersExtra(h, groups.size, state.viewers.size),
                     Modifier.weight(1f).fillMaxHeight(),
                 )
                 val share = if (h.linkKbps > 0) (h.totalKbps.toFloat() / h.linkKbps).coerceIn(0f, 1f) else null
                 Tile(
                     stringResource(R.string.ui_tile_bandwidth),
                     if (h.linkKbps > 0) stringResource(R.string.ui_ratio_spaced, mbps(h.totalKbps), mbps(h.linkKbps)) else mbps(h.totalKbps),
-                    null,
+                    linkName(h.wifiMhz),
                     Modifier.weight(1f).fillMaxHeight(),
                     valueWarn = h.linkBusy(),
                 ) {
@@ -400,7 +427,7 @@ fun HealthDetails(state: CastState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            SectionLabel(stringResource(R.string.ui_viewers_section, state.viewers.size), Modifier.padding(top = 4.dp))
+            SectionLabel(viewersSection(state.viewers, groups), Modifier.padding(top = 4.dp))
         }
         if (state.viewers.isEmpty()) {
             Text(
@@ -410,9 +437,9 @@ fun HealthDetails(state: CastState) {
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
             )
         }
-        sortWorstFirst(state.viewers, captureFps).forEachIndexed { i, v ->
+        groups.forEachIndexed { i, g ->
             if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ViewerDetailRow(v, captureFps, deviceHasHardware = h.hardwareEncoders > 0 || hw > 0)
+            ViewerDetailRow(g, captureFps, deviceHasHardware = h.hardwareEncoders > 0 || hw > 0)
         }
         val others = state.addresses.drop(1)
         val port = state.port

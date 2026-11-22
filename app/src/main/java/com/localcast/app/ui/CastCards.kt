@@ -87,7 +87,7 @@ fun IdleHero(
     onOpenSettings: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().widthIn(max = 480.dp),
+        Modifier.widthIn(max = 480.dp).fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         StartButton(state.phase, onStart)
@@ -253,9 +253,15 @@ fun AirPlaque(state: CastState, modifier: Modifier = Modifier) {
 
 /** Plaque, timer and the settings button: the phone's top row while on air. */
 @Composable
-fun LiveTopRow(state: CastState, liveSince: Long?, onOpenSettings: () -> Unit) {
+fun LiveTopRow(
+    state: CastState,
+    liveSince: Long?,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+    timerStyle: TextStyle = MaterialTheme.typography.headlineSmall,
+) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .padding(start = 20.dp, end = 8.dp),
@@ -266,7 +272,7 @@ fun LiveTopRow(state: CastState, liveSince: Long?, onOpenSettings: () -> Unit) {
         if (state.phase == CastPhase.LIVE && liveSince != null) {
             LiveTimer(
                 liveSince,
-                MaterialTheme.typography.headlineSmall,
+                timerStyle,
                 if (state.isPaused) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
         }
@@ -500,9 +506,9 @@ fun NoAddress(state: CastState) {
     }
 }
 
-/** Phone: QR, address, PIN and "Show to viewers", centred. */
+/** Phone and portrait tablet ([large] text): QR, address, PIN and "Show to viewers", centred. */
 @Composable
-fun ConnectBlock(state: CastState, snackbar: SnackbarHostState, qrSide: Dp, onShow: () -> Unit) {
+fun ConnectBlock(state: CastState, snackbar: SnackbarHostState, qrSide: Dp, onShow: () -> Unit, large: Boolean = false) {
     val url = state.primaryUrl
     val qrUrl = state.qrUrl
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -511,9 +517,9 @@ fun ConnectBlock(state: CastState, snackbar: SnackbarHostState, qrSide: Dp, onSh
             return@Column
         }
         QrPlate(qrUrl, qrSide, onShow)
-        Spacer(Modifier.height(4.dp))
-        AddressText(url, snackbar, MaterialTheme.typography.titleMedium)
-        PinLine(state, centered = true)
+        Spacer(Modifier.height(if (large) 8.dp else 4.dp))
+        AddressText(url, snackbar, if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
+        if (large) PinLine(state, centered = true, big = MaterialTheme.typography.headlineMedium) else PinLine(state, centered = true)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.size(48.dp))
             ChipButton(stringResource(R.string.ui_show_viewers), painterResource(R.drawable.ic_fullscreen), onShow)
@@ -533,7 +539,7 @@ fun ConnectBlockWide(state: CastState, snackbar: SnackbarHostState, onShow: () -
     }
     BoxWithConstraints {
         // Larger tablets get a larger code: it is scanned from across a table.
-        val side = (maxWidth * 0.32f).coerceIn(164.dp, 240.dp)
+        val side = (maxWidth * 0.42f).coerceIn(164.dp, 320.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.Top) {
             QrPlate(qrUrl, side, onShow)
             Column(Modifier.weight(1f)) {
@@ -588,7 +594,7 @@ fun LiveButtons(state: CastState, onStop: () -> Unit, modifier: Modifier = Modif
 fun PausedPanel(state: CastState, modifier: Modifier = Modifier) {
     val brand = MaterialTheme.brand
     Column(
-        modifier.fillMaxWidth().widthIn(max = 480.dp),
+        modifier.widthIn(max = 480.dp).fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
