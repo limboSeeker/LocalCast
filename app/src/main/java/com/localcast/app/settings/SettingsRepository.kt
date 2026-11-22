@@ -1,5 +1,7 @@
 package com.localcast.app.settings
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.retryWhen
 import java.io.IOException
 import kotlinx.coroutines.flow.catch
 import androidx.datastore.preferences.core.emptyPreferences
@@ -47,6 +49,10 @@ data class StreamSettings(
     }
 }
 
+/** Transient read errors of the settings file are retried this many times before falling back to defaults. */
+private const val IO_RETRIES = 3L
+private const val IO_RETRY_DELAY_MS = 500L
+
 // A corrupted file (e.g. power loss during a write) is replaced with defaults instead of crashing
 // every start of the app and of casting.
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
@@ -66,6 +72,8 @@ class SettingsRepository(private val context: Context) {
     }
 
     val settings: Flow<StreamSettings> = context.dataStore.data
+        .retryWhen { e, attempt -> e is IOException && attempt < IO_RETRIES && run { delay(IO_RETRY_DELAY_MS); true } }
+        // Still failing: defaults (this ends the flow, so live changes stop until the next start).
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { p ->
             val d = StreamSettings()

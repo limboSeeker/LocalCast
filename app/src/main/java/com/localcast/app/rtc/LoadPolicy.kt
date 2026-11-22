@@ -122,6 +122,15 @@ object LoadPolicy {
         return min(step, maxFps)
     }
 
+    /**
+     * Next frame-rate cap from [current] toward [wanted]: down at once, up one step at a time, so
+     * a sawing bandwidth estimate does not swing 10 -> 60 -> 10.
+     */
+    fun nextFpsCap(current: Int, wanted: Int): Int {
+        if (wanted <= current) return wanted
+        return min(wanted, FPS_STEPS.firstOrNull { it > current } ?: wanted)
+    }
+
     /** scaleResolutionDownBy for a lite stream of a [width]x[height] capture. */
     fun liteScale(width: Int, height: Int): Double = max(1.0, max(width, height) / LITE_LONG_SIDE.toDouble())
 

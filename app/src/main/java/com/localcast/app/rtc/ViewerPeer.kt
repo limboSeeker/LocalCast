@@ -1,5 +1,6 @@
 package com.localcast.app.rtc
 
+import android.os.SystemClock
 import android.util.Log
 import com.localcast.app.server.DenyReason
 import com.localcast.app.server.IceCandidateDto
@@ -147,6 +148,11 @@ internal class ViewerPeer(
 
     override fun onAnswer(sdp: String) = engine.post {
         val peer = pc ?: return@post
+        if (peer.signalingState() != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+            // An answer to an older offer (a newer one is already out): its ICE credentials differ.
+            Log.i(TAG, "$viewerId: answer ignored in ${peer.signalingState()}")
+            return@post
+        }
         Log.i(
             DIAG_TAG,
             "$viewerId answer extmap: " +
@@ -178,20 +184,44 @@ internal class ViewerPeer(
         }
     }
 
-    /** Renegotiates after [delayMs] if generation [gen] is still the current one and not connected. */
-    private fun renegotiateIfStill(gen: Int, delayMs: Long) = engine.postDelayed(delayMs) {
+    // Server-side recovery of a lost connection (engine thread).
+    private var serverRenegotiations = 0
+    private var disconnectedSinceMs = 0L
+    private var lastOfferMs = 0L
+
+    private fun failedRetryDelayMs(): Long = RENEGOTIATE_BACKOFF_MS.getOrElse(serverRenegotiations) { -1L }
+
+    /**
+     * Renegotiates after [delayMs] if generation [gen] is still current and not connected: after a
+     * FAILED at once, then with backoff; after a DISCONNECTED only once it has lasted the grace time
+     * (a later flap does not shorten it). After [RENEGOTIATE_BACKOFF_MS] attempts the dead connection
+     * is only released (its hardware encoder freed); the page's own restart brings the viewer back.
+     */
+    private fun renegotiateIfStill(gen: Int, delayMs: Long) = engine.postDelayed(maxOf(delayMs, 0L)) {
         if (closed || gen != generation || connected) return@postDelayed
-        Log.i(TAG, "$viewerId: connection lost, renegotiating")
+        val now = SystemClock.elapsedRealtime()
+        if (disconnectedSinceMs != 0L && now - disconnectedSinceMs < DISCONNECTED_GRACE_MS) return@postDelayed
+        if (delayMs < 0 || serverRenegotiations >= RENEGOTIATE_BACKOFF_MS.size) {
+            Log.i(TAG, "$viewerId: connection lost, releasing it until the viewer restarts")
+            disposePeerConnection()
+            return@postDelayed
+        }
+        serverRenegotiations++
+        Log.i(TAG, "$viewerId: connection lost, renegotiating (#$serverRenegotiations)")
+        lastOfferMs = now
+        disconnectedSinceMs = 0L
         negotiate()
     }
 
-    private var lastRestartMs = 0L
-
     override fun restart() = engine.post {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastRestartMs < MIN_RESTART_INTERVAL_MS) return@post // each one builds a PeerConnection
-        lastRestartMs = now
+        val now = SystemClock.elapsedRealtime()
+        // Each restart builds a PeerConnection; one right after our own new offer would race it
+        // (the page answers the older offer).
+        if (now - lastOfferMs < MIN_RESTART_INTERVAL_MS) return@post
+        lastOfferMs = now
         Log.i(TAG, "$viewerId: restart requested by viewer")
+        serverRenegotiations = 0
+        disconnectedSinceMs = 0L
         connected = false
         engine.onPeerConnectionState(viewerId, false)
         negotiate()
@@ -380,8 +410,9 @@ internal class ViewerPeer(
             else -> { fpsRiseVotes = 0; return }
         }
         fpsRiseVotes = 0
-        fpsCap = wanted.takeIf { it < p.fps }
-        Log.i(DIAG_TAG, "$viewerId fps cap $current -> $wanted at target=${targetBps / 1000}kbps")
+        val next = LoadPolicy.nextFpsCap(current, wanted)
+        fpsCap = next.takeIf { it < p.fps }
+        Log.i(DIAG_TAG, "$viewerId fps cap $current -> $next at target=${targetBps / 1000}kbps")
         applySendParameters()
     }
 
@@ -424,8 +455,15 @@ internal class ViewerPeer(
                 // away as busy. Renegotiate over the (still open) WebSocket; a gone viewer's socket
                 // times out and closes the session.
                 when (newState) {
-                    PeerConnection.PeerConnectionState.FAILED -> renegotiateIfStill(gen, 0)
-                    PeerConnection.PeerConnectionState.DISCONNECTED -> renegotiateIfStill(gen, DISCONNECTED_GRACE_MS)
+                    PeerConnection.PeerConnectionState.CONNECTED -> {
+                        serverRenegotiations = 0
+                        disconnectedSinceMs = 0L
+                    }
+                    PeerConnection.PeerConnectionState.FAILED -> renegotiateIfStill(gen, failedRetryDelayMs())
+                    PeerConnection.PeerConnectionState.DISCONNECTED -> {
+                        disconnectedSinceMs = SystemClock.elapsedRealtime()
+                        renegotiateIfStill(gen, DISCONNECTED_GRACE_MS)
+                    }
                     else -> Unit
                 }
             }
@@ -461,7 +499,10 @@ internal class ViewerPeer(
     private companion object {
         /** A DISCONNECTED PeerConnection that does not come back within this is renegotiated. */
         const val DISCONNECTED_GRACE_MS = 10_000L
-        const val MIN_RESTART_INTERVAL_MS = 1_000L
+        /** A viewer restart within this of our last offer is a duplicate: that offer is on its way. */
+        const val MIN_RESTART_INTERVAL_MS = 3_000L
+        /** Delays of server renegotiations after FAILED; then the connection is only released. */
+        val RENEGOTIATE_BACKOFF_MS = longArrayOf(0L, 5_000L, 15_000L)
         const val MAX_PENDING_ICE = 64
         const val TAG = "LocalCast/Peer"
         const val DIAG_TAG = "LocalCast/Diag"

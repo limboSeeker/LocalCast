@@ -101,4 +101,15 @@ class LoadPolicyTest {
         assertEquals(30, LoadPolicy.fpsForBitrate(8_000_000, p1080, 30))
         assertEquals(60, LoadPolicy.fpsForBitrate(0, p1080, 60))
     }
+
+    @Test
+    fun frameRateCapFallsAtOnceAndRisesStepByStep() {
+        assertEquals(10, LoadPolicy.nextFpsCap(60, 10))
+        assertEquals(15, LoadPolicy.nextFpsCap(10, 60))
+        assertEquals(45, LoadPolicy.nextFpsCap(30, 60))
+        assertEquals(60, LoadPolicy.nextFpsCap(45, 60))
+        assertEquals(30, LoadPolicy.nextFpsCap(30, 30))
+        // A profile below the steps (e.g. 24 fps) is reached directly.
+        assertEquals(24, LoadPolicy.nextFpsCap(20, 24))
+    }
 }
