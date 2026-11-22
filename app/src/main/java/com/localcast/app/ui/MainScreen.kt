@@ -9,27 +9,27 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,15 +53,18 @@ import com.localcast.app.service.CastController
 import com.localcast.app.service.CastPhase
 import com.localcast.app.service.CastState
 import com.localcast.app.service.CastStateStore
+import com.localcast.app.service.PauseReason
 import com.localcast.app.settings.StreamSettings
 
 @Composable
-fun MainScreen(snackbarHostState: SnackbarHostState, onStart: () -> Unit) {
+fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: () -> Unit) {
     val context = LocalContext.current
     val state by CastStateStore.state.collectAsStateWithLifecycle()
     val settings by LocalCastApp.instance.settings.settings.collectAsStateWithLifecycle(initialValue = StreamSettings())
     var showSettings by rememberSaveable { mutableStateOf(false) }
-    val screen = ScreenState(
+    var showViewers by rememberSaveable { mutableStateOf(false) }
+    var showHealth by rememberSaveable { mutableStateOf(false) }
+    val s = ScreenState(
         cast = state,
         liveSince = rememberLiveSince(state.phase),
         deviceName = rememberDeviceName(),
@@ -67,27 +73,56 @@ fun MainScreen(snackbarHostState: SnackbarHostState, onStart: () -> Unit) {
     )
     val onStop = { CastController.stop(context) }
     val onOpenSettings = { showSettings = true }
+    val actions = Actions(
+        start = onStart,
+        stop = onStop,
+        settings = onOpenSettings,
+        show = { showViewers = true },
+        health = { showHealth = true },
+    )
+    LaunchedEffect(s.onAir) {
+        if (!s.onAir) {
+            showViewers = false
+            showHealth = false
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Tablets and any landscape window: controls left, QR/PIN/viewers right.
-        val twoPane = maxWidth >= 600.dp || maxWidth > maxHeight
-        // A landscape phone is ~400dp tall: keep the whole QR on screen without scrolling.
-        val qrMax = (maxHeight - 200.dp).coerceIn(160.dp, 280.dp)
+        val twoPane = maxWidth >= 600.dp
         Scaffold(
-            topBar = { BrandTopBar(onSettings = onOpenSettings) },
-            bottomBar = { if (!twoPane && screen.onAir) StopBar(state.phase, onStop) },
+            topBar = {
+                when {
+                    !s.onAir -> IdleTopBar(onOpenSettings)
+                    !twoPane -> Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+                        LiveTopRow(state, s.liveSince, onOpenSettings)
+                    }
+                }
+            },
+            bottomBar = {
+                if (s.onAir && !twoPane) {
+                    Box(
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
+                    ) {
+                        if (state.isPaused) PausedButtons(state, onStop) else LiveButtons(state, onStop)
+                    }
+                }
+            },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             containerColor = MaterialTheme.colorScheme.background,
         ) { padding ->
-            if (twoPane) {
-                TwoPane(padding, screen, snackbarHostState, qrMax, onStart, onStop, onOpenSettings)
-            } else {
-                OnePane(padding, screen, snackbarHostState, qrMax, onStart, onOpenSettings)
+            when {
+                !s.onAir -> IdleBody(padding, s, actions)
+                twoPane -> LiveTwoPane(padding, s, snackbarHostState, actions)
+                else -> LiveOnePane(padding, s, snackbarHostState, actions)
             }
         }
     }
 
-    if (showSettings) SettingsSheet(onDismiss = { showSettings = false })
+    if (showHealth && s.onAir) HealthSheet(state, onDismiss = { showHealth = false })
+    if (showViewers && s.onAir) ShowToViewers(state, s.liveSince, appDark, onClose = { showViewers = false })
+    if (showSettings) SettingsScreen(onClose = { showSettings = false })
 }
 
 /** Everything the panes render, gathered once per recomposition. */
@@ -101,128 +136,151 @@ private class ScreenState(
     val onAir: Boolean get() = cast.isActive || cast.phase == CastPhase.STOPPING
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private class Actions(
+    val start: () -> Unit,
+    val stop: () -> Unit,
+    val settings: () -> Unit,
+    val show: () -> Unit,
+    val health: () -> Unit,
+)
+
 @Composable
-private fun BrandTopBar(onSettings: () -> Unit) {
-    TopAppBar(
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                BrandMark(32.dp)
-                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge)
-            }
-        },
-        actions = {
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.ui_settings))
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-    )
+private fun IdleTopBar(onSettings: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .heightIn(min = 64.dp)
+            .padding(start = 20.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.app_name),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.weight(1f).semantics { heading() },
+        )
+        SettingsButton(onSettings)
+    }
 }
 
 @Composable
-private fun StopBar(phase: CastPhase, onStop: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.background) {
-        Column {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            StopButton(
-                phase,
-                onStop,
-                Modifier
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+private fun IdleBody(padding: PaddingValues, s: ScreenState, a: Actions) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Spacer(Modifier.height(8.dp))
+            IdleHero(s.cast, s.deviceName, s.network, s.preset, a.start, a.settings)
+            Text(
+                stringResource(R.string.ui_idle_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 360.dp).padding(top = 24.dp),
             )
         }
     }
 }
 
 @Composable
-private fun OnePane(
-    padding: PaddingValues,
-    s: ScreenState,
-    snackbar: SnackbarHostState,
-    qrMax: Dp,
-    onStart: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        ControlSection(s, onStart, onOpenSettings)
-        DetailSection(s, snackbar, qrMax)
-        TipsLine()
-    }
-}
-
-@Composable
-private fun TwoPane(
-    padding: PaddingValues,
-    s: ScreenState,
-    snackbar: SnackbarHostState,
-    qrMax: Dp,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-        Row(
-            Modifier
-                .widthIn(max = 1200.dp)
-                .fillMaxSize()
-                .padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
-        ) {
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    ControlSection(s, onStart, onOpenSettings)
-                    TipsLine()
-                }
-                if (s.onAir) StopButton(s.cast.phase, onStop, Modifier.padding(vertical = 12.dp))
-            }
+private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: SnackbarHostState, a: Actions) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        if (s.cast.isPaused) {
             Column(
                 Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .heightIn(min = maxHeight)
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                DetailSection(s, snackbar, qrMax)
+                PausedPanel(s.cast)
             }
+            return@BoxWithConstraints
+        }
+        // A short window (landscape phone, split screen) keeps the QR smaller rather than scrolling it away.
+        val qrSide: Dp = (maxHeight - 300.dp).coerceIn(140.dp, 176.dp)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(4.dp))
+            ConnectBlock(s.cast, snackbar, qrSide, a.show)
+            Spacer(Modifier.height(8.dp))
+            HealthCard(s.cast, a.health)
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
-/** Status and the main action: idle hero (start / retry) or the live header. */
+/** Left: status (lamp, timer, health, Pause/Stop). Right: connection (QR, address, PIN) and viewers. */
 @Composable
-private fun ControlSection(s: ScreenState, onStart: () -> Unit, onOpenSettings: () -> Unit) {
-    if (s.onAir) {
-        LiveHeaderCard(s.cast, s.liveSince, s.deviceName, s.network, s.preset, onOpenSettings)
-    } else {
-        IdleHeroCard(s.cast, s.deviceName, s.network, s.preset, onStart, onOpenSettings)
+private fun LiveTwoPane(padding: PaddingValues, s: ScreenState, snackbar: SnackbarHostState, a: Actions) {
+    val state = s.cast
+    Row(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.weight(0.42f).fillMaxHeight().padding(horizontal = 24.dp)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 8.dp, bottom = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.fillMaxWidth()) {
+                    Box(Modifier.align(Alignment.TopStart)) { SettingsButton(a.settings) }
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = 16.dp)) { AirLamp(state, s.liveSince) }
+                }
+                Spacer(Modifier.height(24.dp))
+                if (state.isPaused) {
+                    PausedExplanation(state)
+                } else {
+                    HealthCard(state, a.health, grid = true, maxViewers = 0)
+                }
+            }
+            val bottom = Modifier.padding(bottom = 16.dp, top = 4.dp)
+            if (state.isPaused) PausedButtons(state, a.stop, bottom) else LiveButtons(state, a.stop, bottom)
+        }
+        VerticalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        Column(
+            Modifier
+                .weight(0.58f)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+        ) {
+            ConnectBlockWide(state, snackbar, a.show)
+            Spacer(Modifier.height(24.dp))
+            SectionLabel(stringResource(R.string.ui_viewers_section, state.viewers.size), Modifier.padding(bottom = 8.dp))
+            ViewerList(sortWorstFirst(state.viewers, state.capture?.fps), state.capture?.fps)
+        }
     }
 }
 
-/** How viewers connect: steps when idle; QR, address, PIN and viewers while on air. */
+/** Tablet paused state: the lamp already says "Paused"; this says what viewers see. */
 @Composable
-private fun DetailSection(s: ScreenState, snackbar: SnackbarHostState, qrMax: Dp) {
-    if (s.onAir) {
-        ConnectCard(s.cast, snackbar, qrMax)
-        PinCard(s.cast)
-        ViewersCard(s.cast.viewers, s.cast.capture?.fps)
-    } else {
-        StepsCard()
+private fun PausedExplanation(state: CastState) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(R.string.ui_paused_title),
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            stringResource(if (state.pause == PauseReason.LOCKED) R.string.ui_paused_body_locked else R.string.ui_paused_body),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

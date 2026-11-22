@@ -321,7 +321,7 @@ private fun ThemeRow() {
     if (!open) return
     AlertDialog(
         onDismissRequest = { open = false },
-        title = { Text(stringResource(R.string.ui_set_theme)) },
+        title = { Text(stringResource(R.string.ui_set_theme), style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(Modifier.selectableGroup()) {
                 ThemeMode.entries.forEach { mode ->

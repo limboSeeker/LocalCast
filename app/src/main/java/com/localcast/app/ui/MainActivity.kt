@@ -11,16 +11,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.localcast.app.R
 import com.localcast.app.service.CastController
 import com.localcast.app.service.CastPhase
@@ -36,14 +44,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        UiPrefs.init(this)
         // On recreation the request was already handled (or deliberately dropped).
         if (savedInstanceState == null) consumeAutoStart(intent)
         setContent {
-            LocalCastTheme {
+            val dark = when (UiPrefs.theme) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            // System bar icons follow the app theme, which may differ from the system one.
+            LaunchedEffect(dark) {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+            LocalCastTheme(darkTheme = dark) {
                 val context = LocalContext.current
                 val scope = rememberCoroutineScope()
                 val snackbar = remember { SnackbarHostState() }
                 val permissionDenied = stringResource(R.string.error_projection_denied)
+                var captureHint by rememberSaveable { mutableStateOf(false) }
 
                 val projectionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult(),
@@ -57,11 +79,22 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                val askConsent = {
+                    projectionLauncher.launch(CastController.createProjectionIntent(context))
+                }
+                // Android 14+ lets the user share a single app; LocalCast needs the entire screen.
+                val proceed = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !UiPrefs.captureHintSeen) {
+                        captureHint = true
+                    } else {
+                        askConsent()
+                    }
+                }
                 val notificationLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) {
                     // Denied is fine: the broadcast works, only the notification is hidden.
-                    projectionLauncher.launch(CastController.createProjectionIntent(context))
+                    proceed()
                 }
 
                 val startCast = {
@@ -72,7 +105,7 @@ class MainActivity : ComponentActivity() {
                     if (needNotif) {
                         notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
-                        projectionLauncher.launch(CastController.createProjectionIntent(context))
+                        proceed()
                     }
                 }
 
@@ -82,7 +115,25 @@ class MainActivity : ComponentActivity() {
                     if (requests > 0 && (phase == CastPhase.IDLE || phase == CastPhase.ERROR)) startCast()
                 }
 
-                MainScreen(snackbarHostState = snackbar, onStart = startCast)
+                MainScreen(snackbarHostState = snackbar, appDark = dark, onStart = startCast)
+
+                if (captureHint) {
+                    AlertDialog(
+                        onDismissRequest = { captureHint = false },
+                        title = { Text(stringResource(R.string.ui_capture_hint_title), style = MaterialTheme.typography.titleLarge) },
+                        text = { Text(stringResource(R.string.ui_capture_hint_text), style = MaterialTheme.typography.bodyLarge) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                UiPrefs.markCaptureHintSeen()
+                                captureHint = false
+                                askConsent()
+                            }) { Text(stringResource(R.string.ui_capture_hint_ok)) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { captureHint = false }) { Text(stringResource(R.string.ui_cancel)) }
+                        },
+                    )
+                }
             }
         }
     }

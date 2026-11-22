@@ -1,6 +1,5 @@
 package com.localcast.app.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -10,20 +9,20 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.unit.dp
 
 private val LocalCastShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 /**
- * Brand theme. Dynamic colour is intentionally off: the blue/coral pair is the product's identity
- * and the live/health colours are tuned against these exact surfaces.
+ * Brand theme. Dynamic colour is intentionally off: the on-air and health colours are tuned
+ * against these exact surfaces.
  */
 @Composable
 fun LocalCastTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(LocalBrandColors provides if (darkTheme) DarkBrand else LightBrand) {
@@ -36,6 +35,6 @@ fun LocalCastTheme(
     }
 }
 
-/** `MaterialTheme.brand.live` etc. */
+/** `MaterialTheme.brand.liveDot` etc. */
 val MaterialTheme.brand: BrandColors
     @Composable @ReadOnlyComposable get() = LocalBrandColors.current

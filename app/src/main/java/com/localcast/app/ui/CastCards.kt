@@ -5,9 +5,9 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,43 +17,35 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
@@ -62,31 +54,31 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.min
 import com.localcast.app.R
-import com.localcast.app.service.AddressKind
 import com.localcast.app.service.CastController
 import com.localcast.app.service.CastPhase
 import com.localcast.app.service.CastState
-import com.localcast.app.ui.theme.AddressSmallTextStyle
-import com.localcast.app.ui.theme.AddressTextStyle
-import com.localcast.app.ui.theme.OverlineTextStyle
-import com.localcast.app.ui.theme.PinTextStyle
+import com.localcast.app.service.PauseReason
 import com.localcast.app.ui.theme.brand
+import com.localcast.app.ui.theme.pin
+import com.localcast.app.ui.theme.tabular
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 // ---------- Idle ----------
 
+/** Idle screen body: the round Start button, readiness, network and quality chips. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun IdleHeroCard(
+fun IdleHero(
     state: CastState,
     deviceName: String,
     network: NetworkKind,
@@ -94,28 +86,42 @@ fun IdleHeroCard(
     onStart: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    BrandCard {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            BrandMark(52.dp)
-            Column(Modifier.weight(1f)) {
-                Overline(stringResource(R.string.ui_device_label))
-                Text(deviceName, style = MaterialTheme.typography.headlineSmall)
-            }
-        }
+    Column(
+        Modifier.fillMaxWidth().widthIn(max = 480.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        StartButton(state.phase, onStart)
+        Spacer(Modifier.height(32.dp))
+        Text(
+            stringResource(R.string.ui_ready_title),
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            deviceName,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             NetworkChip(network)
             PresetChip(preset, onOpenSettings)
         }
+        if (state.phase == CastPhase.ERROR || network.isMissing || network.isWarning) Spacer(Modifier.height(16.dp))
         if (state.phase == CastPhase.ERROR) {
             NoticeBox(
                 text = state.error ?: stringResource(R.string.ui_error_unknown),
                 tone = Tone.ERROR,
                 title = stringResource(R.string.ui_status_error),
             )
+            Spacer(Modifier.height(8.dp))
         }
         when {
             network.isMissing -> NoticeBox(stringResource(R.string.ui_no_network), Tone.WARN)
@@ -123,65 +129,61 @@ fun IdleHeroCard(
                 stringResource(R.string.ui_net_24_hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
-        val busy = state.phase == CastPhase.STOPPING
-        Button(
-            onClick = onStart,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
-            shape = MaterialTheme.shapes.medium,
-            contentPadding = ButtonDefaults.ContentPadding,
-        ) {
+    }
+}
+
+/** 184 dp disc in a thin ring: the single "go" control of the idle screen. */
+@Composable
+private fun StartButton(phase: CastPhase, onStart: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val busy = phase == CastPhase.STOPPING
+    val retry = phase == CastPhase.ERROR
+    val label = stringResource(
+        when {
+            busy -> R.string.ui_status_stopping
+            retry -> R.string.ui_retry
+            else -> R.string.ui_start
+        },
+    )
+    Box(
+        Modifier
+            .size(184.dp)
+            .border(1.5.dp, MaterialTheme.brand.readyOutline, CircleShape)
+            .padding(13.dp)
+            .clip(CircleShape)
+            .background(scheme.primaryContainer)
+            .clickable(enabled = !busy, role = Role.Button, onClick = onStart)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (busy) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.width(12.dp))
-                Text(stringResource(R.string.ui_status_stopping), style = MaterialTheme.typography.titleMedium)
+                CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 2.5.dp, color = scheme.primary)
             } else {
-                val retry = state.phase == CastPhase.ERROR
                 Icon(
                     if (retry) rememberVectorPainter(Icons.Filled.Refresh) else painterResource(R.drawable.ic_stat_cast),
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    stringResource(if (retry) R.string.ui_retry else R.string.ui_start),
-                    style = MaterialTheme.typography.titleMedium,
+                    tint = scheme.primary,
+                    modifier = Modifier.size(36.dp),
                 )
             }
-        }
-        Text(
-            stringResource(R.string.ui_idle_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-fun StepsCard() {
-    BrandCard {
-        SectionTitle(stringResource(R.string.ui_steps_title))
-        listOf(R.string.ui_step_1, R.string.ui_step_2, R.string.ui_step_3).forEachIndexed { i, res ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                NumberBadge(i + 1)
-                Text(
-                    stringResource(res),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f).padding(top = 4.dp),
-                )
-            }
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                color = scheme.onPrimaryContainer,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
         }
     }
 }
-
-// ---------- Chips ----------
 
 @Composable
 fun NetworkChip(kind: NetworkKind) {
     val brand = MaterialTheme.brand
-    val scheme = MaterialTheme.colorScheme
     val label = stringResource(
         when (kind) {
             NetworkKind.WIFI_5 -> R.string.ui_net_wifi_5
@@ -200,18 +202,13 @@ fun NetworkChip(kind: NetworkKind) {
         NetworkKind.NONE -> R.drawable.ic_wifi_off
         else -> R.drawable.ic_wifi
     }
-    val (bg, fg) = when {
-        kind.isMissing -> brand.badContainer to brand.onBadContainer
-        kind.isWarning -> brand.warnContainer to brand.onWarnContainer
-        else -> scheme.secondaryContainer to scheme.onSecondaryContainer
+    val tint = when {
+        kind.isMissing -> brand.liveDot
+        kind.isWarning -> brand.warn
+        else -> MaterialTheme.colorScheme.primary
     }
-    InfoPill(
-        text = label,
-        icon = painterResource(icon),
-        container = bg,
-        content = fg,
-        description = stringResource(R.string.ui_net_cd, label),
-    )
+    val cd = stringResource(R.string.ui_net_cd, label)
+    InfoChip(label, painterResource(icon), Modifier.clearAndSetSemantics { contentDescription = cd }, tint = tint)
 }
 
 @Composable
@@ -221,102 +218,75 @@ private fun presetName(preset: Preset?): String =
 @Composable
 fun PresetChip(preset: Preset?, onClick: () -> Unit) {
     val name = presetName(preset)
-    val cd = stringResource(R.string.ui_preset_chip_cd, name)
-    AssistChip(
+    ChipButton(
+        text = stringResource(R.string.ui_preset_chip, name.lowercase()),
+        icon = painterResource(R.drawable.ic_tune),
         onClick = onClick,
-        label = { Text(name, style = MaterialTheme.typography.labelLarge) },
-        leadingIcon = {
-            Icon(
-                painterResource(presetIcon(preset)),
-                contentDescription = null,
-                modifier = Modifier.size(AssistChipDefaults.IconSize),
-            )
-        },
-        modifier = Modifier.semantics { contentDescription = cd },
+        onClickLabel = stringResource(R.string.ui_preset_chip_action),
     )
 }
 
-fun presetIcon(preset: Preset?): Int = when (preset) {
+fun presetIcon(preset: Preset): Int = when (preset) {
     Preset.SPEED -> R.drawable.ic_speed
+    Preset.BALANCE -> R.drawable.ic_tune
     Preset.QUALITY -> R.drawable.ic_hq
-    Preset.BALANCE, null -> R.drawable.ic_tune
 }
 
-// ---------- Live ----------
+// ---------- Live: header ----------
 
-@OptIn(ExperimentalLayoutApi::class)
+/** "On air" / "Paused" / "Starting…" plaque. The lamp colour does not depend on health. */
 @Composable
-fun LiveHeaderCard(
-    state: CastState,
-    liveSince: Long?,
-    deviceName: String,
-    network: NetworkKind,
-    preset: Preset?,
-    onOpenSettings: () -> Unit,
-) {
-    BrandCard {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            LiveBadge(live = state.phase == CastPhase.LIVE)
-            Spacer(Modifier.weight(1f))
-            if (state.phase == CastPhase.LIVE && liveSince != null) LiveTimer(liveSince)
+fun AirPlaque(state: CastState, modifier: Modifier = Modifier) {
+    val brand = MaterialTheme.brand
+    val scheme = MaterialTheme.colorScheme
+    when {
+        state.phase == CastPhase.STOPPING ->
+            StatusPlaque(stringResource(R.string.ui_status_stopping), scheme.surfaceContainer, scheme.onSurface, null, modifier)
+        state.phase != CastPhase.LIVE ->
+            StatusPlaque(stringResource(R.string.ui_starting_badge), scheme.surfaceContainer, scheme.onSurface, null, modifier)
+        state.isPaused ->
+            StatusPlaque(stringResource(R.string.ui_paused_badge), brand.warnContainer, brand.onWarnContainer, brand.warn, modifier)
+        else ->
+            StatusPlaque(stringResource(R.string.ui_live_badge), brand.liveContainer, brand.onLiveContainer, brand.liveDot, modifier)
+    }
+}
+
+/** Plaque, timer and the settings button: the phone's top row while on air. */
+@Composable
+fun LiveTopRow(state: CastState, liveSince: Long?, onOpenSettings: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .padding(start = 20.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AirPlaque(state)
+        Spacer(Modifier.weight(1f))
+        if (state.phase == CastPhase.LIVE && liveSince != null) {
+            LiveTimer(
+                liveSince,
+                MaterialTheme.typography.headlineSmall,
+                if (state.isPaused) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Overline(deviceName)
-            val cap = state.capture
-            if (cap != null) {
-                Text(
-                    stringResource(R.string.ui_capture_info, cap.width, cap.height, cap.fps),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            NetworkChip(network)
-            PresetChip(preset, onOpenSettings)
-        }
+        SettingsButton(onOpenSettings)
     }
 }
 
 @Composable
-fun LiveBadge(live: Boolean) {
-    val brand = MaterialTheme.brand
-    val scheme = MaterialTheme.colorScheme
-    val bg = if (live) brand.live else scheme.secondaryContainer
-    val fg = if (live) brand.onLive else scheme.onSecondaryContainer
-    Row(
-        Modifier
-            .heightIn(min = 32.dp)
-            .clip(RoundedCornerShape(50))
-            .background(bg)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (live) {
-            // Static on purpose: this screen is itself being cast, and an endless animation would
-            // keep the encoder and Wi-Fi busy at full frame rate while nothing else changes.
-            Box(Modifier.size(10.dp).clip(CircleShape).background(fg))
-        } else {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = fg)
-        }
-        Text(
-            stringResource(if (live) R.string.ui_live_badge else R.string.ui_starting_badge),
-            style = OverlineTextStyle,
-            color = fg,
+fun SettingsButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            Icons.Filled.Settings,
+            contentDescription = stringResource(R.string.ui_settings),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
-private fun LiveTimer(since: Long) {
+fun LiveTimer(since: Long, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
     val elapsed by produceState(SystemClock.elapsedRealtime() - since, since) {
         while (true) {
             val now = SystemClock.elapsedRealtime()
@@ -328,10 +298,9 @@ private fun LiveTimer(since: Long) {
     val cd = stringResource(R.string.ui_live_duration_cd, text)
     Text(
         text,
-        // Tabular figures: digits keep their width, so the timer doesn't jitter every second.
-        style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.clearAndSetSemantics { contentDescription = cd },
+        style = style.tabular(),
+        color = color,
+        modifier = modifier.clearAndSetSemantics { contentDescription = cd },
     )
 }
 
@@ -343,271 +312,337 @@ internal fun formatDuration(ms: Long): String {
     return if (h > 0) String.format(Locale.ROOT, "%d:%02d:%02d", h, m, s) else String.format(Locale.ROOT, "%02d:%02d", m, s)
 }
 
+/** Tablet: the lamp on a tonal disc with "On air" (or "Paused") inside, the big timer below. */
 @Composable
-private fun kindLabel(kind: AddressKind): String = stringResource(
-    when (kind) {
-        AddressKind.WIFI -> R.string.ui_kind_wifi
-        AddressKind.HOTSPOT -> R.string.ui_kind_hotspot
-        AddressKind.ETHERNET -> R.string.ui_kind_ethernet
-        AddressKind.USB -> R.string.ui_kind_usb
-        AddressKind.VPN -> R.string.ui_kind_vpn
-        AddressKind.OTHER -> R.string.ui_kind_other
-    },
+fun AirLamp(state: CastState, liveSince: Long?) {
+    val brand = MaterialTheme.brand
+    val scheme = MaterialTheme.colorScheme
+    val paused = state.isPaused
+    val live = state.phase == CastPhase.LIVE
+    val (bg, ring, lamp, fg) = when {
+        !live -> listOf(scheme.surfaceContainer, scheme.outlineVariant, scheme.outline, scheme.onSurface)
+        paused -> listOf(brand.warnContainer, brand.warnOutline, brand.warn, brand.onWarnContainer)
+        else -> listOf(brand.liveContainer, brand.liveOutline, brand.liveDot, brand.onLiveContainer)
+    }
+    val label = stringResource(
+        when {
+            state.phase == CastPhase.STOPPING -> R.string.ui_status_stopping
+            !live -> R.string.ui_starting_badge
+            paused -> R.string.ui_paused_badge
+            else -> R.string.ui_live_badge
+        },
+    )
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier
+                .size(120.dp)
+                .clip(CircleShape)
+                .background(bg)
+                .border(1.5.dp, ring, CircleShape)
+                .semantics(mergeDescendants = true) {},
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (live) Dot(lamp, size = 16.dp) else CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = fg)
+                Text(label, style = MaterialTheme.typography.titleMedium, color = fg, textAlign = TextAlign.Center)
+            }
+        }
+        if (live && liveSince != null) {
+            LiveTimer(
+                liveSince,
+                MaterialTheme.typography.displaySmall,
+                if (paused) scheme.onSurfaceVariant else scheme.onSurface,
+            )
+        }
+    }
+}
+
+// ---------- Live: connect (QR, address, PIN) ----------
+
+/** QR in dark modules on the off-white plate (both are theme colours; the bitmap is black/white). */
+@Composable
+fun QrPlate(qrUrl: String, side: Dp, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val brand = MaterialTheme.brand
+    val qr by rememberQrBitmap(qrUrl, margin = QR_MARGIN)
+    val showLabel = stringResource(R.string.ui_show_viewers)
+    Box(
+        modifier
+            .size(side)
+            .clip(MaterialTheme.shapes.medium)
+            .background(brand.qrBackground)
+            .then(if (brand.cardBorder.alpha > 0f) Modifier.border(1.dp, brand.cardBorder, MaterialTheme.shapes.medium) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = showLabel, role = Role.Button, onClick = onClick) else Modifier)
+            .padding(6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        qr?.let {
+            Image(
+                bitmap = it,
+                contentDescription = stringResource(R.string.ui_qr_description),
+                filterQuality = FilterQuality.None,
+                colorFilter = qrColors(brand.qrModules, brand.qrBackground),
+                modifier = Modifier.fillMaxSize(),
+            )
+        } ?: CircularProgressIndicator(Modifier.size(32.dp), color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/** Two quiet-zone modules inside the plate's own light padding make ~10–16 dp of quiet zone. */
+const val QR_MARGIN = 2
+
+/** Maps the black/white bitmap onto [dark]/[light]: out = dark + (light − dark) × in. */
+private fun qrColors(dark: Color, light: Color): ColorFilter = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            light.red - dark.red, 0f, 0f, 0f, dark.red * 255f,
+            0f, light.green - dark.green, 0f, 0f, dark.green * 255f,
+            0f, 0f, light.blue - dark.blue, 0f, dark.blue * 255f,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    ),
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Address with tap-to-copy. */
 @Composable
-fun ConnectCard(state: CastState, snackbar: SnackbarHostState, qrMax: Dp = 280.dp) {
+fun AddressText(url: String, snackbar: SnackbarHostState, style: TextStyle, textAlign: TextAlign = TextAlign.Center, sidePadding: Dp = 8.dp) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val url = state.primaryUrl
-    val copiedText = stringResource(R.string.ui_copied)
-    val shareTitle = stringResource(R.string.ui_share_title)
+    val copied = stringResource(R.string.ui_copied)
     val clipLabel = stringResource(R.string.app_name)
-
-    BrandCard {
-        Text(
-            stringResource(R.string.ui_connect_hint),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (url == null) {
-            if (state.port == null && state.phase == CastPhase.STARTING) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                    Text(stringResource(R.string.ui_waiting_address), style = MaterialTheme.typography.bodyMedium)
-                }
-            } else {
-                NoticeBox(stringResource(R.string.ui_no_network), Tone.WARN)
+    val shown = url.removePrefix("http://").removeSuffix("/")
+    Text(
+        shown,
+        style = style.tabular(),
+        color = MaterialTheme.colorScheme.onSurface,
+        textAlign = textAlign,
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClickLabel = stringResource(R.string.ui_copy_address)) {
+                val cm = context.getSystemService(ClipboardManager::class.java)
+                cm.setPrimaryClip(ClipData.newPlainText(clipLabel, url))
+                // Android 13+ shows its own clipboard confirmation.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
             }
-            return@BrandCard
-        }
-
-        state.qrUrl?.let { QrPlate(it, qrMax) }
-
-        Text(
-            url.removeSuffix("/"),
-            style = AddressTextStyle,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilledTonalButton(
-                onClick = {
-                    val cm = context.getSystemService(ClipboardManager::class.java)
-                    cm.setPrimaryClip(ClipData.newPlainText(clipLabel, url))
-                    // Android 13+ shows its own clipboard confirmation.
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copiedText) }
-                },
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) {
-                Icon(painterResource(R.drawable.ic_copy), contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.ui_copy))
-            }
-            OutlinedButton(
-                onClick = {
-                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
-                    context.startActivity(Intent.createChooser(send, shareTitle))
-                },
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) {
-                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.ui_share))
-            }
-        }
-
-        val others = state.addresses.drop(1)
-        val port = state.port
-        if (others.isNotEmpty() && port != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Overline(stringResource(R.string.ui_other_addresses))
-                for (a in others) {
-                    Text(
-                        stringResource(R.string.ui_address_with_kind, "http://${a.ip}:$port", kindLabel(a.kind)),
-                        style = AddressSmallTextStyle,
-                    )
-                }
-            }
-        }
-    }
+            .padding(horizontal = sidePadding, vertical = 12.dp),
+    )
 }
 
 @Composable
-private fun QrPlate(qrUrl: String, maxSide: Dp) {
-    val qr by rememberQrBitmap(qrUrl)
-    Column(
-        Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            val side = min(maxWidth, maxSide)
-            Box(
-                Modifier
-                    .size(side)
-                    .clip(MaterialTheme.shapes.large)
-                    .background(MaterialTheme.brand.qrBackground)
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                qr?.let {
-                    Image(
-                        bitmap = it,
-                        contentDescription = stringResource(R.string.ui_qr_description),
-                        filterQuality = FilterQuality.None,
-                        modifier = Modifier.fillMaxSize().aspectRatio(1f),
-                    )
-                } ?: CircularProgressIndicator(Modifier.size(32.dp), color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Text(
-            stringResource(R.string.ui_qr_caption),
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+fun ShareButton(url: String) {
+    val context = LocalContext.current
+    val title = stringResource(R.string.ui_share_title)
+    IconButton(onClick = {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+        context.startActivity(Intent.createChooser(send, title))
+    }) {
+        Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.ui_share_address), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
+/** "PIN 530 955" with a "New PIN" button, or a warning when the PIN is off. */
 @Composable
-fun PinCard(state: CastState) {
+fun PinLine(state: CastState, centered: Boolean, big: TextStyle = MaterialTheme.typography.headlineSmall) {
     val context = LocalContext.current
     val pin = state.pin
     if (!state.pinRequired || pin == null) {
-        BrandCard { NoticeBox(stringResource(R.string.ui_pin_disabled), Tone.WARN) }
+        Text(
+            stringResource(R.string.ui_pin_disabled),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.brand.warnText,
+            textAlign = if (centered) TextAlign.Center else TextAlign.Start,
+        )
         return
     }
-    BrandCard {
-        Column {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.Lock,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Overline(stringResource(R.string.ui_pin_title), Modifier.weight(1f))
-                TextButton(
-                    onClick = { CastController.regeneratePin(context) },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.ui_pin_new))
-                }
-            }
-            val pinCd = stringResource(R.string.ui_pin_cd, pin.toCharArray().joinToString(" "))
-            Text(
-                formatPin(pin),
-                style = PinTextStyle,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.clearAndSetSemantics { contentDescription = pinCd },
-            )
-        }
+    val pinCd = stringResource(R.string.ui_pin_cd, pin.toCharArray().joinToString(" "))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (centered) Spacer(Modifier.size(48.dp))
         Text(
-            stringResource(R.string.ui_pin_hint),
+            stringResource(R.string.ui_pin_label),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 10.dp, top = 6.dp),
+        )
+        Text(
+            formatPin(pin),
+            style = big.pin(),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.clearAndSetSemantics { contentDescription = pinCd },
+        )
+        IconButton(onClick = { CastController.regeneratePin(context) }) {
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = stringResource(R.string.ui_pin_new),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+fun formatPin(pin: String): String =
+    if (pin.length == 6) "${pin.substring(0, 3)} ${pin.substring(3)}" else pin
+
+/** Waiting for the server address, or no network at all. */
+@Composable
+fun NoAddress(state: CastState) {
+    if (state.port == null && state.phase == CastPhase.STARTING) {
+        Row(
+            Modifier.heightIn(min = 120.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+            Text(stringResource(R.string.ui_waiting_address), style = MaterialTheme.typography.bodyMedium)
+        }
+    } else {
+        NoticeBox(stringResource(R.string.ui_no_network), Tone.WARN)
+    }
+}
+
+/** Phone: QR, address, PIN and "Show to viewers", centred. */
+@Composable
+fun ConnectBlock(state: CastState, snackbar: SnackbarHostState, qrSide: Dp, onShow: () -> Unit) {
+    val url = state.primaryUrl
+    val qrUrl = state.qrUrl
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (url == null || qrUrl == null) {
+            NoAddress(state)
+            return@Column
+        }
+        QrPlate(qrUrl, qrSide, onShow)
+        Spacer(Modifier.height(4.dp))
+        AddressText(url, snackbar, MaterialTheme.typography.titleMedium)
+        PinLine(state, centered = true)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.size(48.dp))
+            ChipButton(stringResource(R.string.ui_show_viewers), painterResource(R.drawable.ic_fullscreen), onShow)
+            ShareButton(url)
+        }
+    }
+}
+
+/** Tablet: QR on the left, address / PIN / "Show" on the right. */
+@Composable
+fun ConnectBlockWide(state: CastState, snackbar: SnackbarHostState, onShow: () -> Unit) {
+    val url = state.primaryUrl
+    val qrUrl = state.qrUrl
+    if (url == null || qrUrl == null) {
+        NoAddress(state)
+        return
+    }
+    BoxWithConstraints {
+        // Larger tablets get a larger code: it is scanned from across a table.
+        val side = (maxWidth * 0.32f).coerceIn(164.dp, 240.dp)
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.Top) {
+            QrPlate(qrUrl, side, onShow)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.ui_address_label),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AddressText(url, snackbar, MaterialTheme.typography.titleMedium, TextAlign.Start, sidePadding = 0.dp)
+                PinLine(state, centered = false)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ChipButton(stringResource(R.string.ui_show_short), painterResource(R.drawable.ic_fullscreen), onShow)
+                    ShareButton(url)
+                }
+            }
+        }
+    }
+}
+
+// ---------- Live: controls ----------
+
+/** Pause (tonal) and Stop (tonal "on air" plaque colour). */
+@Composable
+fun LiveButtons(state: CastState, onStop: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val brand = MaterialTheme.brand
+    val scheme = MaterialTheme.colorScheme
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        BigButton(
+            text = stringResource(R.string.ui_pause),
+            onClick = { CastController.pause(context) },
+            container = scheme.surfaceContainerHigh,
+            content = scheme.onSurface,
+            icon = painterResource(R.drawable.ic_pause),
+            enabled = state.phase == CastPhase.LIVE,
+            modifier = Modifier.weight(1f),
+        )
+        BigButton(
+            text = stringResource(if (state.phase == CastPhase.STOPPING) R.string.ui_status_stopping else R.string.ui_stop),
+            onClick = onStop,
+            container = brand.liveContainer,
+            content = brand.onLiveContainer,
+            icon = painterResource(R.drawable.ic_stop),
+            busy = state.phase == CastPhase.STOPPING,
+            modifier = Modifier.weight(1f),
         )
     }
 }
 
-private fun formatPin(pin: String): String =
-    if (pin.length == 6) "${pin.substring(0, 3)} ${pin.substring(3)}" else pin
-
-// ---------- Tips ----------
-
-/** One link-like line; expands in place. */
+/** Calm paused state: what viewers see, why it is paused, and the way back. */
 @Composable
-fun TipsLine() {
-    val context = LocalContext.current
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val batteryOptimized = rememberBatteryOptimized()
-    val stateText = stringResource(if (expanded) R.string.ui_tips_collapse else R.string.ui_tips_expand)
-    Column(Modifier.fillMaxWidth()) {
-        Row(
+fun PausedPanel(state: CastState, modifier: Modifier = Modifier) {
+    val brand = MaterialTheme.brand
+    Column(
+        modifier.fillMaxWidth().widthIn(max = 480.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
             Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .clip(MaterialTheme.shapes.medium)
-                .clickable(role = Role.Button, onClickLabel = stateText) { expanded = !expanded }
-                .semantics { stateDescription = stateText }
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .size(120.dp)
+                .clip(CircleShape)
+                .background(brand.warnContainer)
+                .border(1.5.dp, brand.warnOutline, CircleShape),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(painterResource(R.drawable.ic_lightbulb), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Text(
-                stringResource(R.string.ui_tips_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.rotate(if (expanded) 180f else 0f),
-            )
+            Icon(painterResource(R.drawable.ic_visibility_off), contentDescription = null, tint = brand.warn, modifier = Modifier.size(36.dp))
         }
-        AnimatedVisibility(expanded) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceContainer)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(stringResource(R.string.ui_tip_latency), style = MaterialTheme.typography.bodyMedium)
-                if (batteryOptimized) {
-                    Text(stringResource(R.string.ui_tip_battery), style = MaterialTheme.typography.bodyMedium)
-                    OutlinedButton(
-                        onClick = { openBatterySettings(context) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Icon(painterResource(R.drawable.ic_battery), contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.ui_tip_battery_action))
-                    }
-                }
-            }
-        }
+        Spacer(Modifier.height(28.dp))
+        Text(
+            stringResource(R.string.ui_paused_title),
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(if (state.pause == PauseReason.LOCKED) R.string.ui_paused_body_locked else R.string.ui_paused_body),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
-// ---------- Stop ----------
-
+/** "Back on air" (the screen's one filled button) and "End broadcast". */
 @Composable
-fun StopButton(phase: CastPhase, onStop: () -> Unit, modifier: Modifier = Modifier) {
+fun PausedButtons(state: CastState, onStop: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val brand = MaterialTheme.brand
-    val stopping = phase == CastPhase.STOPPING
-    Button(
-        onClick = onStop,
-        enabled = !stopping,
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp),
-        shape = MaterialTheme.shapes.medium,
-        colors = ButtonDefaults.buttonColors(containerColor = brand.live, contentColor = brand.onLive),
-    ) {
-        if (stopping) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.ui_status_stopping), style = MaterialTheme.typography.titleMedium)
-        } else {
-            Icon(painterResource(R.drawable.ic_stop), contentDescription = null, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(stringResource(R.string.ui_stop), style = MaterialTheme.typography.titleMedium)
+    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        BigButton(
+            text = stringResource(R.string.ui_resume),
+            onClick = { CastController.resume(context) },
+            container = brand.live,
+            content = brand.onLive,
+            icon = painterResource(R.drawable.ic_stat_cast),
+            enabled = state.phase == CastPhase.LIVE,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(
+            onClick = onStop,
+            enabled = state.phase != CastPhase.STOPPING,
+            modifier = Modifier.heightIn(min = 56.dp).padding(top = 4.dp).semantics { role = Role.Button },
+        ) {
+            Text(
+                stringResource(R.string.ui_end_broadcast),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
 }
