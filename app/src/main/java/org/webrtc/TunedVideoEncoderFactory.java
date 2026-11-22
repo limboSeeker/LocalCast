@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   private static final String TAG = "LocalCast/Encoder";
-  private static final String AVC = "video/avc";
   /** Periodic key frames are not needed: new viewers / losses request them via PLI/FIR. */
   private static final int KEY_FRAME_INTERVAL_SEC = 3600;
 
@@ -51,6 +50,14 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   private final EglBase14.Context sharedContext;
   private final SoftwareVideoEncoderFactory software = new SoftwareVideoEncoderFactory();
   @Nullable private final MediaCodecInfo h264Codec;
+  @Nullable private final MediaCodecInfo h265Codec;
+  private volatile boolean h265Disabled;
+
+  /**
+   * Offer H.265 before H.264 (debug knob {@code hevc}). Browsers that decode it in hardware
+   * (Chrome/Edge 136+, Safari 18+) pick it; all others answer with H.264 or VP8 as before.
+   */
+  public static volatile boolean hevcAllowed = true;
   @Nullable private final Listener listener;
   private final boolean guardEnabled;
   private volatile boolean h264Disabled;
@@ -87,8 +94,10 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
     this.sharedContext = (EglBase14.Context) sharedContext;
     this.listener = listener;
     this.guardEnabled = guardEnabled;
-    this.h264Codec = findHardwareH264Encoder();
-    android.util.Log.i(TAG, "Hardware H.264 encoder: " + (h264Codec == null ? "none" : h264Codec.getName()));
+    this.h264Codec = findHardwareEncoder(VideoCodecMimeType.H264);
+    this.h265Codec = findHardwareEncoder(VideoCodecMimeType.H265);
+    android.util.Log.i(TAG, "Hardware H.264 encoder: " + (h264Codec == null ? "none" : h264Codec.getName())
+        + ", H.265: " + (h265Codec == null ? "none" : h265Codec.getName()));
   }
 
   /** Name of the hardware AVC encoder that will be used, or null if the device has none. */
@@ -106,6 +115,21 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
     return h264Codec != null && !h264Disabled;
   }
 
+  /** Name of the hardware HEVC encoder, or null if the device has none. */
+  @Nullable
+  public String getHardwareH265Name() {
+    return h265Codec == null ? null : h265Codec.getName();
+  }
+
+  /** Exclude H.265 from future negotiations (its hardware encoder failed). */
+  public void setH265Disabled(boolean disabled) {
+    h265Disabled = disabled;
+  }
+
+  public boolean isH265Offered() {
+    return hevcAllowed && h265Codec != null && !h265Disabled && isH264Offered();
+  }
+
   /** Hardware H.264 encoder instances that are running or initialising right now. */
   public static int getLiveHardwareEncoders() {
     return liveHardwareEncoders.get();
@@ -114,6 +138,11 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   @Override
   public VideoCodecInfo[] getSupportedCodecs() {
     List<VideoCodecInfo> codecs = new ArrayList<>();
+    if (isH265Offered()) {
+      codecs.add(new VideoCodecInfo(VideoCodecMimeType.H265.name(),
+          MediaCodecUtils.getCodecProperties(VideoCodecMimeType.H265, /* highProfile= */ false),
+          new ArrayList<>()));
+    }
     if (isH264Offered()) {
       codecs.add(new VideoCodecInfo(VideoCodecMimeType.H264.name(),
           MediaCodecUtils.getCodecProperties(VideoCodecMimeType.H264, /* highProfile= */ false),
@@ -130,6 +159,12 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   @Nullable
   @Override
   public VideoEncoder createEncoder(VideoCodecInfo info) {
+    if (VideoCodecMimeType.H265.name().equalsIgnoreCase(info.name)) {
+      if (h265Codec == null) {
+        return null;
+      }
+      return createHardware(h265Codec, VideoCodecMimeType.H265, info, "h265#");
+    }
     if (VideoCodecMimeType.H264.name().equalsIgnoreCase(info.name)) {
       if (h264Codec == null) {
         return null;
@@ -139,23 +174,7 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
         Logging.w(TAG, "Unsupported H.264 profile requested: " + info.params);
         return null;
       }
-      String name = h264Codec.getName();
-      MediaCodecInfo.CodecCapabilities caps = h264Codec.getCapabilitiesForType(AVC);
-      Integer surfaceColorFormat =
-          MediaCodecUtils.selectColorFormat(MediaCodecUtils.TEXTURE_COLOR_FORMATS, caps);
-      Integer yuvColorFormat =
-          MediaCodecUtils.selectColorFormat(MediaCodecUtils.ENCODER_COLOR_FORMATS, caps);
-      // Overshoot guard for every vendor; Exynos AVC encoders additionally ignore timestamps for
-      // rate control (libwebrtc's FramerateBitrateAdjuster quirk, kept inside the guard).
-      BitrateAdjuster adjuster = new GuardBitrateAdjuster(
-          isExynos(name), guardEnabled, "h264#" + encoderSerial.incrementAndGet());
-      HardwareVideoEncoder encoder = new HardwareVideoEncoder(new TunedCodecFactory(),
-          name, VideoCodecMimeType.H264, surfaceColorFormat, yuvColorFormat, info.params,
-          KEY_FRAME_INTERVAL_SEC, /* forceKeyFrameIntervalMs= */ 0, adjuster, sharedContext);
-      if (listener != null) {
-        listener.onEncoderCreated(name, true);
-      }
-      return new NoScalingEncoder(encoder, name, listener);
+      return createHardware(h264Codec, VideoCodecMimeType.H264, info, "h264#");
     }
     if (VideoCodecMimeType.VP8.name().equalsIgnoreCase(info.name)) {
       if (listener != null) {
@@ -166,12 +185,35 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
     return null;
   }
 
+  /** Hardware encoder for [type] behind the same guard, hints and keyframe throttle for every codec. */
+  private VideoEncoder createHardware(
+      MediaCodecInfo codec, VideoCodecMimeType type, VideoCodecInfo info, String label) {
+    String name = codec.getName();
+    MediaCodecInfo.CodecCapabilities caps = codec.getCapabilitiesForType(type.mimeType());
+    Integer surfaceColorFormat =
+        MediaCodecUtils.selectColorFormat(MediaCodecUtils.TEXTURE_COLOR_FORMATS, caps);
+    Integer yuvColorFormat =
+        MediaCodecUtils.selectColorFormat(MediaCodecUtils.ENCODER_COLOR_FORMATS, caps);
+    // Overshoot guard for every vendor; Exynos encoders additionally ignore timestamps for rate
+    // control (libwebrtc's FramerateBitrateAdjuster quirk, kept inside the guard).
+    BitrateAdjuster adjuster = new GuardBitrateAdjuster(
+        isExynos(name), guardEnabled, label + encoderSerial.incrementAndGet());
+    HardwareVideoEncoder encoder = new HardwareVideoEncoder(new TunedCodecFactory(),
+        name, type, surfaceColorFormat, yuvColorFormat, info.params,
+        KEY_FRAME_INTERVAL_SEC, /* forceKeyFrameIntervalMs= */ 0, adjuster, sharedContext);
+    if (listener != null) {
+      listener.onEncoderCreated(name, true);
+    }
+    return new NoScalingEncoder(encoder, name, listener);
+  }
+
   private static boolean isExynos(String name) {
     return name.startsWith("OMX.Exynos.") || name.startsWith("c2.exynos.");
   }
 
+  /** First hardware encoder for [type] with surface input (zero-copy texture path), or null. */
   @Nullable
-  private static MediaCodecInfo findHardwareH264Encoder() {
+  private static MediaCodecInfo findHardwareEncoder(VideoCodecMimeType type) {
     MediaCodecInfo[] infos;
     try {
       infos = new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos();
@@ -184,14 +226,16 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
         continue;
       }
       String name = info.getName();
-      if (name.contains(".secure") || !MediaCodecUtils.codecSupportsType(info, VideoCodecMimeType.H264)) {
+      // ".secure" needs protected surfaces; ".cq"/".hdr" variants are for constant quality / HDR.
+      if (name.contains(".secure") || name.endsWith(".cq") || name.endsWith(".hdr")
+          || !MediaCodecUtils.codecSupportsType(info, type)) {
         continue;
       }
       if (!info.isHardwareAccelerated() || info.isSoftwareOnly()) {
         continue;
       }
       try {
-        MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(AVC);
+        MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(type.mimeType());
         if (MediaCodecUtils.selectColorFormat(MediaCodecUtils.TEXTURE_COLOR_FORMATS, caps) == null) {
           continue; // Surface input is required for the zero-copy texture path.
         }

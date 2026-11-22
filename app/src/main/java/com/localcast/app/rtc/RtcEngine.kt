@@ -128,6 +128,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
     /** A/B switches, read when a broadcast starts (debug builds: adb setprop, see [DebugKnobs]). */
     @Volatile internal var qualityLadder = true
+
+    /** FlexFEC offered to browsers that receive it (debug knob `fec`); see [fieldTrials]. */
+    @Volatile private var flexFec = false
     private var currentFps = 0
     private var statsTask: ScheduledFuture<*>? = null
     private var released = false
@@ -249,9 +252,12 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         val egl = EglBase.create().also { eglBase = it }
         val guard = DebugKnobs.int("guard", 1) != 0
         qualityLadder = DebugKnobs.int("ladder", 1) != 0
+        flexFec = DebugKnobs.int("fec", DEFAULT_FEC) != 0
+        TunedVideoEncoderFactory.hevcAllowed = DebugKnobs.int("hevc", DEFAULT_HEVC) != 0
         TunedVideoEncoderFactory.minKeyFrameIntervalMs = DebugKnobs.int("key_interval_ms", 1000)
         TunedVideoEncoderFactory.maxOperatingRate = DebugKnobs.int("enc_max_rate", 0) != 0
-        val trials = fieldTrials(DebugKnobs.int("bwe_trials", DEFAULT_BWE_TRIALS))
+        val trials = fieldTrials(DebugKnobs.int("bwe_trials", DEFAULT_BWE_TRIALS)) +
+            if (flexFec) "WebRTC-FlexFEC-03/Enabled/WebRTC-FlexFEC-03-Advertised/Enabled/" else ""
         val encoders = TunedVideoEncoderFactory(egl.eglBaseContext, encoderListener, guard).also { encoderFactory = it }
         val probe = encoders.hardwareH264Name?.let(EncoderProbe::probe)
         encoderProbe = probe
@@ -537,10 +543,16 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
      */
     internal fun applyCodecPreferences(transceiver: RtpTransceiver, preferSoftware: Boolean) {
         val codecs = factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs
+        // H.265 first where the hardware has it: browsers that decode it (Chrome/Edge 136+ with a
+        // hardware decoder, Safari 18+) take it, the rest answer H.264, the oldest VP8.
+        val h265 = if (encoderFactory?.isH265Offered == true) codecs.filter { it.name.equals("H265", true) } else emptyList()
         val h264 = if (encoderFactory?.isH264Offered == true) codecs.filter { it.name.equals("H264", true) } else emptyList()
         val vp8 = codecs.filter { it.name.equals("VP8", true) }
         val rtx = codecs.filter { it.name.equals("rtx", true) }
-        val ordered = (if (preferSoftware) vp8 + h264 else h264 + vp8) + rtx
+        // FlexFEC is only negotiated when listed here (and advertised by the field trial); browsers
+        // that don't receive it simply leave it out of the answer.
+        val fec = if (flexFec) codecs.filter { it.name.equals("flexfec-03", true) } else emptyList()
+        val ordered = (if (preferSoftware) vp8 + h264 else h265 + h264 + vp8) + rtx + fec
         if (ordered.isEmpty()) return
         val result = transceiver.setCodecPreferences(ordered)
         Log.d(TAG, "codec preferences ${ordered.map { it.name }}: $result")
@@ -573,7 +585,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     internal fun onPeerEncoder(peer: ViewerPeer, codec: String?, hardware: Boolean?) {
         if (peers[peer.viewerId] !== peer || peer.softwareEncoder || !deviceHasHardware()) return
         when {
-            codec.equals("H264", ignoreCase = true) -> if (hardware == true) peer.hardwareConfirmed = true
+            codec.equals("H264", ignoreCase = true) || codec.equals("H265", ignoreCase = true) ->
+                if (hardware == true) peer.hardwareConfirmed = true
             codec.equals("VP8", ignoreCase = true) -> {
                 if (peers.values.count { it.softwareEncoder } < softwareBudget()) {
                     Log.w(DIAG_TAG, "${peer.viewerId}: hardware encoder unavailable, lite VP8: ${loadLine()}")
@@ -604,8 +617,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     internal fun onViewerReport(viewerId: String, stats: ViewerStats) = listener.onViewerReport(viewerId, stats)
 
     internal fun isHardwareImplementation(name: String): Boolean {
-        val hw = encoderFactory?.hardwareH264Name ?: return false
-        return name.contains(hw, ignoreCase = true)
+        val f = encoderFactory ?: return false
+        return listOfNotNull(f.hardwareH264Name, f.hardwareH265Name).any { name.contains(it, ignoreCase = true) }
     }
 
     // ---- display geometry ----
@@ -690,6 +703,13 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 }
                 return
             }
+            if (codecName == encoderFactory?.hardwareH265Name) {
+                // libwebrtc switches the session to the next negotiated codec (H.264) by itself;
+                // new viewers are not offered H.265 again during this broadcast.
+                Log.e(TAG, "hardware HEVC encoder $codecName failed: $reason — H.264 from now on")
+                post { encoderFactory?.setH265Disabled(true) }
+                return
+            }
             Log.e(TAG, "hardware encoder $codecName failed: $reason — VP8 for new sessions, retry in ${H264_RETRY_S}s")
             // libwebrtc switches the running session to the next negotiated codec (VP8) by itself;
             // stop offering H.264 for a while so later viewers start directly on the working path.
@@ -741,6 +761,10 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         private const val TRIAL_TRENDLINE = 2
         private const val TRIAL_RAPID_RECOVERY = 4
         private const val DEFAULT_BWE_TRIALS = 0
+
+        /** Defaults of the A/B switches above; decided by measurements on a device (see commits). */
+        private const val DEFAULT_HEVC = 1
+        private const val DEFAULT_FEC = 0
 
         /**
          * - ALR probing: while the screen is static (application-limited) probe at 2x the estimate

@@ -58,6 +58,9 @@ internal class ViewerPeer(
     /** Steps the [ladder] index refers to, with the capture they were made for. */
     private var ladderFor: Triple<CaptureSize, List<QualityLadder.Rung>, Boolean>? = null
 
+    /** Codec of the last stats ("H265", "H264", "VP8"): the ladder's budgets depend on it. */
+    private var lastCodec: String? = null
+
     /** Stats polls since the PeerConnection connected: the estimate is still ramping up meanwhile. */
     private var pollsSinceConnect = 0
 
@@ -180,7 +183,7 @@ internal class ViewerPeer(
                 val wanted = engine.startBitrateFor(this, maxBps)
                 val size = engine.captureSize
                 if (rung != null && ladder.index > 0 && size != null) {
-                    minOf(wanted, QualityLadder.needBps(rung, size.width, size.height).toInt())
+                    minOf(wanted, QualityLadder.needBps(rung, size.width, size.height, QualityLadder.bitsPerPixel(lastCodec)).toInt())
                         .coerceAtLeast(CaptureFormat.MIN_BITRATE_BPS)
                 } else {
                     wanted
@@ -447,6 +450,7 @@ internal class ViewerPeer(
                 degraded = degraded,
             ),
         )
+        if (codec != null) lastCodec = codec
         adaptQuality((m["targetBitrate"] as? Number)?.toInt())
         // Last: this may turn the viewer away (closes the peer).
         engine.onPeerEncoder(this, codec, hardware)
@@ -469,6 +473,7 @@ internal class ViewerPeer(
         val before = ladder.index.coerceIn(0, rungs.lastIndex)
         ladder = QualityLadder.next(
             rungs, size.width, size.height, ladder, targetBps, share.fullBps, SystemClock.elapsedRealtime(),
+            QualityLadder.bitsPerPixel(lastCodec),
         )
         if (ladder.index == before) return
         Log.i(

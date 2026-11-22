@@ -30,6 +30,12 @@ object QualityLadder {
     /** Bits per pixel per frame that keep scrolling text readable in H.264 screen content. */
     const val BITS_PER_PIXEL = 0.05
 
+    /** The same for H.265: ~30% fewer bits for the same quality. */
+    const val HEVC_BITS_PER_PIXEL = 0.035
+
+    fun bitsPerPixel(codec: String?): Double =
+        if (codec.equals("H265", ignoreCase = true)) HEVC_BITS_PER_PIXEL else BITS_PER_PIXEL
+
     /** Short side of the reduced size: sharpness first keeps text at 720p; smoothness goes to 540p. */
     const val SHARP_SHORT_SIDE = 720
     const val SMOOTH_SHORT_SIDE = 540
@@ -50,8 +56,9 @@ object QualityLadder {
 
     /**
      * Steps from best to worst for a [width]x[height] capture at [fps]. Frame-rate steps come
-     * before size steps where possible: they need no encoder reset.
-     * Sharpness first (the user's order): full size at fps → full size at 30 → 720p 30 → 720p 15 → 720p 10.
+     * before size steps: they need no encoder reset (a new size resets the hardware encoder,
+     * a keyframe and a visible hitch).
+     * Sharpness first: full size at fps → 30 → 20 → 15 → 720p 15 → 720p 10.
      * Smoothness first: full size → 540p at fps → 540p 30 → 540p 15.
      */
     fun rungs(width: Int, height: Int, fps: Int, sharp: Boolean): List<Rung> {
@@ -60,7 +67,10 @@ object QualityLadder {
         val f30 = min(fps, 30)
         val steps = if (sharp) {
             val s = scaleTo(SHARP_SHORT_SIDE)
-            listOf(Rung(1.0, fps), Rung(1.0, f30), Rung(s, f30), Rung(s, min(fps, 15)), Rung(s, min(fps, 10)))
+            listOf(
+                Rung(1.0, fps), Rung(1.0, f30), Rung(1.0, min(fps, 20)), Rung(1.0, min(fps, 15)),
+                Rung(s, min(fps, 15)), Rung(s, min(fps, 10)),
+            )
         } else {
             val s = scaleTo(SMOOTH_SHORT_SIDE)
             listOf(Rung(1.0, fps), Rung(s, fps), Rung(s, f30), Rung(s, min(fps, 15)))
@@ -69,8 +79,8 @@ object QualityLadder {
     }
 
     /** Bitrate a [rung] of a [width]x[height] capture needs to stay readable. */
-    fun needBps(rung: Rung, width: Int, height: Int): Double =
-        (width / rung.scale) * (height / rung.scale) * rung.fps * BITS_PER_PIXEL
+    fun needBps(rung: Rung, width: Int, height: Int, bitsPerPixel: Double = BITS_PER_PIXEL): Double =
+        (width / rung.scale) * (height / rung.scale) * rung.fps * bitsPerPixel
 
     /**
      * Current step, the polls so far that would allow a step up, when the step last changed and
@@ -81,6 +91,8 @@ object QualityLadder {
         val riseVotes: Int = 0,
         val changedAtMs: Long = Long.MIN_VALUE / 2,
         val holdMs: Long = MIN_HOLD_MS,
+        /** Polls in a row that wanted a smaller size: the size changes on the second one. */
+        val shrinkVotes: Int = 0,
     )
 
     /**
@@ -98,33 +110,44 @@ object QualityLadder {
         targetBps: Int,
         capBps: Int,
         nowMs: Long,
+        bitsPerPixel: Double = BITS_PER_PIXEL,
     ): State {
         if (rungs.isEmpty()) return State()
         val current = state.index.coerceIn(0, rungs.lastIndex)
         val capLimited = targetBps >= capBps * CAP_LIMITED_SHARE
-        fun fits(i: Int) = capLimited || needBps(rungs[i], width, height) <= targetBps
-        val fit = rungs.indices.firstOrNull { fits(it) } ?: rungs.lastIndex
+        fun fits(i: Int) = capLimited || needBps(rungs[i], width, height, bitsPerPixel) <= targetBps
+        var fit = rungs.indices.firstOrNull { fits(it) } ?: rungs.lastIndex
+        var shrinkVotes = 0
+        if (fit > current && rungs[fit].scale != rungs[current].scale && state.shrinkVotes < 1) {
+            // A smaller size resets the encoder: only when the next poll still wants it. Meanwhile
+            // the lowest frame rate at the current size.
+            shrinkVotes = 1
+            fit = rungs.indices.last { rungs[it].scale == rungs[current].scale }
+            if (fit <= current) return state.copy(index = current, shrinkVotes = 1)
+        }
         if (fit > current) {
             // A rise that did not hold: wait longer before the next one.
             val failedRise = nowMs - state.changedAtMs < state.holdMs && state.riseVotes == -1
             val hold = if (failedRise) min(state.holdMs * 2, MAX_HOLD_MS) else state.holdMs
-            return State(fit, 0, nowMs, hold)
+            return State(fit, 0, nowMs, hold, shrinkVotes)
         }
+        // No smaller size wanted this poll: forget a pending one.
+        val base = state.copy(shrinkVotes = 0)
         val holding = nowMs - state.changedAtMs < state.holdMs
         if (current == 0) {
             // Keep the "just rose" mark through the hold (a fall then still counts as a failed
             // rise); after a steady hold at full quality, forget past failures.
-            return if (holding) state.copy(index = 0) else state.copy(index = 0, riseVotes = 0, holdMs = MIN_HOLD_MS)
+            return if (holding) base.copy(index = 0) else base.copy(index = 0, riseVotes = 0, holdMs = MIN_HOLD_MS)
         }
-        if (holding) return state.copy(index = current, riseVotes = votesAfterRise(state))
-        val upper = needBps(rungs[current - 1], width, height)
+        if (holding) return base.copy(index = current, riseVotes = votesAfterRise(state))
+        val upper = needBps(rungs[current - 1], width, height, bitsPerPixel)
         if (capLimited || targetBps >= upper * RISE_MARGIN) {
             val votes = max(0, state.riseVotes) + 1
             // riseVotes = -1 marks "just rose": a fall within the hold counts as a failed rise.
-            return if (votes >= RISE_POLLS) State(current - 1, -1, nowMs, state.holdMs) else state.copy(index = current, riseVotes = votes)
+            return if (votes >= RISE_POLLS) State(current - 1, -1, nowMs, state.holdMs) else base.copy(index = current, riseVotes = votes)
         }
         // Held steady through a whole hold: forget past failures.
-        return state.copy(index = current, riseVotes = 0, holdMs = MIN_HOLD_MS)
+        return base.copy(index = current, riseVotes = 0, holdMs = MIN_HOLD_MS)
     }
 
     private fun votesAfterRise(state: State) = if (state.riseVotes == -1) -1 else 0
