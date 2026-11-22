@@ -1,32 +1,39 @@
 // E2E for the viewer page against the mock phone. Run: node --test viewer.spec.mjs
+// BROWSER=webkit runs the viewer in Playwright WebKit (Safari engine); the mock phone page always runs in Chromium,
+// like the real phone's libwebrtc offerer.
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { startMock } from './mock-server.mjs';
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'out');
 fs.mkdirSync(OUT, { recursive: true });
-let mock, browser, ctx, phone, errors, extraCtx = [];
+const ENGINE = process.env.BROWSER === 'webkit' ? 'webkit' : 'chromium';
+const WEBKIT = ENGINE === 'webkit';
+let mock, phoneBrowser, browser, phoneCtx, ctx, phone, errors, extraCtx = [];
 const post = (p) => fetch(mock.url + p, { method: 'POST' });
-const shot = (page, name) => page.screenshot({ path: path.join(OUT, name) });
+const shot = (page, name) => page.screenshot({ path: path.join(OUT, WEBKIT ? name.replace(/\.png$/, '-webkit.png') : name) });
 
 before(async () => {
   mock = await startMock(0);
-  browser = await chromium.launch({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--autoplay-policy=no-user-gesture-required'] });
+  phoneBrowser = await chromium.launch({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--autoplay-policy=no-user-gesture-required'] });
+  browser = WEBKIT ? await webkit.launch() : phoneBrowser;
 });
-after(async () => { await browser?.close(); mock?.close(); });
+after(async () => { if (browser !== phoneBrowser) await browser?.close(); await phoneBrowser?.close(); mock?.close(); });
 const VIEWPORT = { width: 390, height: 844 };
 beforeEach(async () => {
   await ctx?.close();
+  if (phoneCtx !== ctx) await phoneCtx?.close();
   for (const c of extraCtx.splice(0)) await c.close();
   await post('/mock/reset');
   // The page picks its language from navigator.languages: the Ukrainian checks run in a uk-UA browser.
   ctx = await browser.newContext({ viewport: VIEWPORT, locale: 'uk-UA' });
+  phoneCtx = WEBKIT ? await phoneBrowser.newContext() : ctx;
   errors = [];
-  phone = await ctx.newPage();
+  phone = await phoneCtx.newPage();
   await phone.goto(mock.url + '/phone');
   await phone.waitForFunction(() => window.phoneReady);
 });
@@ -106,7 +113,8 @@ test('/mock/drop -> playing again without PIN', async () => {
   await post('/mock/drop');
   await v.waitForFunction(() => window.__localcast.pc && window.__localcast.pc !== window.__oldpc && window.__localcast.state === 'playing' && window.__localcast.stats.framesDecoded > 15, null, { timeout: 25000 });
   assert.ok(!(await v.locator('#pinform').isVisible()));
-  assert.deepEqual(errors, []);
+  // WebKit logs the socket the mock just killed as a console error ("The network connection was lost"): expected here.
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
 });
 
 test('uk: /mock/stop -> waiting, /mock/start -> playing', async () => {
@@ -176,4 +184,130 @@ test('?lang=uk overrides an English browser, ?lang=en a Ukrainian one', async ()
   assert.equal(await en.evaluate(() => document.documentElement.lang), 'en');
   assert.equal(await en.locator('#title').innerText(), 'Enter PIN');
   assert.deepEqual(errors, []);
+});
+
+const css = (page, sel, prop) => page.evaluate(([s, p]) => getComputedStyle(document.querySelector(s))[p], [sel, prop]);
+const isIdle = (page) => page.evaluate(() => document.getElementById('stage').classList.contains('idle'));
+
+test('uk: pause -> calm pause screen, no reconnect even without frames; resume -> video again', async () => {
+  const v = await viewer('#pin=123456');
+  await playing(v);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  const pcs = await phone.evaluate(() => window.pcs);
+  await post('/mock/pause?on=1');
+  await v.waitForFunction(() => window.__localcast.paused);
+  assert.ok(await v.locator('#pause').isVisible());
+  assert.equal(await v.locator('#pause h2').innerText(), 'Трансляцію призупинено');
+  assert.ok(!(await v.locator('#pill').isVisible()), 'no pill over the pause screen');
+  assert.ok(!(await v.locator('#card').isVisible()));
+  await v.waitForFunction(() => getComputedStyle(document.getElementById('v')).opacity === '0');
+  // The mock phone sends no frames at all while paused: well past the stall limit nothing may be torn down.
+  await v.waitForTimeout((await v.evaluate(() => window.__localcast.STALL_MS)) + 2500);
+  assert.equal(await state(v), 'playing');
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc), 'same PeerConnection');
+  assert.equal(await phone.evaluate(() => window.pcs), pcs, 'phone made no new PeerConnection');
+  assert.ok(await v.locator('#pause').isVisible());
+  await shot(v, 'paused.png');
+  const f0 = await v.evaluate(() => window.__localcast.stats.framesDecoded);
+  await post('/mock/pause?on=0');
+  await v.waitForFunction(() => !window.__localcast.paused);
+  assert.ok(!(await v.locator('#pause').isVisible()));
+  await v.waitForFunction((n) => window.__localcast.stats.framesDecoded > n + 20, f0, { timeout: 10000 });
+  assert.equal(await css(v, '#v', 'opacity'), '1');
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc), 'still the same PeerConnection');
+  assert.equal(await phone.evaluate(() => window.pcs), pcs);
+  assert.deepEqual(errors, []);
+});
+
+test('en-US: joining during a pause shows the pause screen', async () => {
+  await post('/mock/pause?on=1');
+  const v = await viewer('#pin=123456', 'en-US');
+  await v.waitForFunction(() => window.__localcast.paused && window.__localcast.state === 'playing', null, { timeout: 20000 });
+  assert.ok(await v.locator('#pause').isVisible());
+  assert.equal(await v.locator('#pause h2').innerText(), 'Casting is paused');
+  assert.doesNotMatch(await v.locator('#pause').innerText(), CYRILLIC);
+  await post('/mock/pause?on=0');
+  await playing(v, 10);
+  assert.ok(!(await v.locator('#pause').isVisible()));
+  assert.deepEqual(errors, []);
+});
+
+test('projector calm: idle hides cursor, buttons and pill; Esc stays calm; contain letterbox', async () => {
+  const v = await viewer('#pin=123456');
+  await v.setViewportSize({ width: 1280, height: 720 });
+  await playing(v);
+  assert.ok(!(await v.locator('#stats').isVisible()), 'stats off by default');
+  await v.mouse.move(640, 360);
+  assert.equal(await isIdle(v), false);
+  assert.equal(await css(v, '#bar', 'opacity'), '1');
+  await v.waitForFunction(() => document.getElementById('stage').classList.contains('idle'), null, { timeout: 5000 });
+  await v.waitForTimeout(400); // fade-out
+  assert.equal(await css(v, '#bar', 'opacity'), '0');
+  assert.equal(await css(v, '#v', 'cursor'), 'none');
+  assert.equal(await css(v, '#stage', 'cursor'), 'none');
+  assert.ok(!(await v.locator('#pill').isVisible()) || (await css(v, '#pill', 'opacity')) === '0');
+  // Esc (e.g. a clicker or leaving fullscreen) does not bring the controls back.
+  await v.keyboard.press('Escape');
+  assert.equal(await isIdle(v), true);
+  // Picture: black stage, whole viewport, object-fit contain (16:10 tablet on a 16:9 projector -> pillarbox, no crop).
+  assert.equal(await css(v, '#v', 'objectFit'), 'contain');
+  assert.equal(await css(v, '#stage', 'backgroundColor'), 'rgb(0, 0, 0)');
+  const r = await v.evaluate(() => { const b = document.getElementById('v').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; });
+  assert.deepEqual(r, [0, 0, 1280, 720]);
+  await shot(v, 'idle-1280.png');
+  // Input brings the controls back; S/Esc toggle the stats.
+  await v.mouse.move(100, 100);
+  assert.equal(await isIdle(v), false);
+  await v.keyboard.press('s');
+  assert.ok(await v.locator('#stats').isVisible());
+  await v.keyboard.press('Escape');
+  assert.ok(!(await v.locator('#stats').isVisible()), 'Esc closes the stats');
+  assert.deepEqual(errors, []);
+});
+
+test('PIN in the link must be exactly 6 digits', async () => {
+  const v = await viewer('#pin=1234');
+  await v.waitForFunction(() => window.__localcast.state === 'pin');
+  assert.ok(await v.locator('#pinform').isVisible());
+  const v2 = await viewer('#pin=1234567');
+  await v2.waitForFunction(() => window.__localcast.state === 'pin');
+  assert.deepEqual(errors, []);
+});
+
+test('uk: drop during a pause -> back to the pause screen; stop during a pause -> waiting card, no pause screen', async () => {
+  const v = await viewer('#pin=123456');
+  await playing(v);
+  await post('/mock/pause?on=1');
+  await v.waitForFunction(() => window.__localcast.paused);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  await post('/mock/drop');
+  await v.waitForFunction(() => window.__localcast.pc && window.__localcast.pc !== window.__oldpc && window.__localcast.state === 'playing' && window.__localcast.paused, null, { timeout: 25000 });
+  assert.ok(await v.locator('#pause').isVisible());
+  // Resumed while the viewer was away: the fresh state{streaming:true} after welcome clears the stale pause.
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  await post('/mock/drop');
+  await post('/mock/pause?on=0');
+  await v.waitForFunction(() => window.__localcast.pc && window.__localcast.pc !== window.__oldpc && window.__localcast.state === 'playing' && !window.__localcast.paused, null, { timeout: 25000 });
+  assert.ok(!(await v.locator('#pause').isVisible()));
+  await post('/mock/pause?on=1');
+  await v.waitForFunction(() => window.__localcast.paused);
+  await post('/mock/stop');
+  await v.waitForFunction(() => window.__localcast.state === 'waiting');
+  assert.ok(await v.locator('#card').isVisible());
+  assert.ok(!(await v.locator('#pause').isVisible()), 'bye clears the pause screen');
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
+});
+
+test('projector calm: a reconnecting pill stays visible (not idle), calm again after recovery', async () => {
+  const v = await viewer('#pin=123456');
+  await playing(v);
+  await v.waitForFunction(() => document.getElementById('stage').classList.contains('idle'), null, { timeout: 5000 });
+  await post('/mock/drop');
+  await v.waitForFunction(() => {
+    const p = document.getElementById('pill'), st = document.getElementById('stage');
+    return !p.hidden && p.classList.contains('problem') && !st.classList.contains('idle') && getComputedStyle(p).opacity === '1';
+  }, null, { timeout: 5000, polling: 10 });
+  await v.waitForFunction(() => window.__localcast.state === 'playing' && document.getElementById('pill').hidden, null, { timeout: 25000 });
+  await v.waitForFunction(() => document.getElementById('stage').classList.contains('idle'), null, { timeout: 5000 });
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
 });

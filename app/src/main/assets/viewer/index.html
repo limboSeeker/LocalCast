@@ -18,12 +18,22 @@ font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,
 #stage{position:fixed;left:0;top:0;width:100%;height:100vh;height:100dvh;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation;
 background:radial-gradient(120vmax 70vmax at 50% -20%,rgba(30,94,255,.22),rgba(30,94,255,0) 60%),var(--bg)}
 #stage.live{background:#000}
-#stage.idle{cursor:none}
+#stage.idle,#stage.idle *{cursor:none}
+/* contain = letterbox/pillarbox on black, e.g. a 16:10 tablet on a 16:9 projector: never crop, never stretch. */
 video{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:transparent;display:block;opacity:0;transition:opacity .25s}
 #stage.live video{opacity:1;background:#000}
+/* Paused: the video stays laid out (only transparent) so the browser keeps its media wake lock; see keep-awake note in the script. */
+#stage.live.paused video{opacity:0}
+#pause{position:absolute;left:0;top:0;width:100%;height:100%;display:none;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:24px;text-align:center;
+background:radial-gradient(120vmax 70vmax at 50% -20%,rgba(30,94,255,.14),rgba(30,94,255,0) 60%),var(--bg);pointer-events:none}
+#stage.live.paused #pause{display:flex}
+#pause .pi{width:72px;height:72px;margin-bottom:14px;border-radius:50%;display:grid;place-items:center;background:var(--card);border:1px solid var(--line)}
+#pause .pi svg{width:28px;height:28px}
+#pause h2{margin:0;font-size:clamp(22px,3.2vw,40px);line-height:1.25;font-weight:700;letter-spacing:-.01em}
+#pause p{margin:0;color:var(--dim);font-size:clamp(15px,1.6vw,22px);max-width:32em}
 video::-webkit-media-controls{display:none!important}
-.card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(calc(100vw - 32px),400px);max-height:calc(100dvh - 32px);overflow:auto;
-background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid var(--line);border-radius:24px;padding:32px 28px 28px;text-align:center;
+.card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(calc(100vw - 32px),400px);overflow:auto;
+background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid var(--line);border-radius:24px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);padding:32px 28px 28px;text-align:center;
 box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.02) inset}
 .card[hidden],#pill[hidden],#playbtn[hidden],#stats[hidden],#pinform[hidden],#spin[hidden]{display:none}
 .logo{display:block;width:64px;height:64px;margin:0 auto 18px;border-radius:19px;overflow:hidden;box-shadow:0 8px 24px rgba(30,94,255,.35)}
@@ -33,7 +43,8 @@ h1{font-size:24px;line-height:1.25;font-weight:700;letter-spacing:-.01em;margin:
 @keyframes sp{to{transform:rotate(360deg)}}
 #pinform{margin-top:22px}
 #pin{width:100%;height:68px;font:700 34px/1 var(--mono);letter-spacing:.35em;text-align:center;padding:0 8px 0 calc(8px + .35em);
-background:#0a0d13;color:var(--fg);border:1.5px solid var(--line);border-radius:16px;outline:none;transition:border-color .15s,box-shadow .15s}
+background:#0a0d13;color:var(--fg);border:1.5px solid var(--line);border-radius:16px;outline:none;transition:border-color .15s,box-shadow .15s;
+-webkit-user-select:text;user-select:text}
 #pin::placeholder{color:#3a4354}
 #pin:focus{border-color:var(--acc-hi);box-shadow:0 0 0 4px rgba(30,94,255,.3)}
 #err{color:var(--err);min-height:1.45em;margin:12px 0 0;font-size:15px;font-weight:500}
@@ -43,7 +54,8 @@ button:focus-visible{outline:3px solid var(--acc-hi);outline-offset:2px}
 #go:hover:not(:disabled){filter:brightness(1.12)}
 #go:disabled{background:#243049;color:#93a0b8;cursor:default}
 #pill{position:absolute;left:calc(12px + var(--sal));top:calc(12px + var(--sat));display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 16px 8px 14px;border-radius:999px;
-background:var(--glass);border:1px solid rgba(255,255,255,.06);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:14px;font-weight:500;max-width:calc(100vw - 140px)}
+background:var(--glass);border:1px solid rgba(255,255,255,.06);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:14px;font-weight:500;max-width:calc(100vw - 140px);transition:opacity .25s}
+#stage.idle #pill:not(.problem){opacity:0}
 #dot{width:10px;height:10px;border-radius:50%;background:var(--warn);flex:none;box-shadow:0 0 0 3px rgba(255,255,255,.06)}
 #bar{position:absolute;right:calc(12px + var(--sar));top:calc(12px + var(--sat));display:flex;gap:10px;transition:opacity .25s}
 #stage.idle #bar{opacity:0;pointer-events:none}
@@ -54,7 +66,7 @@ background:var(--glass);border:1px solid rgba(255,255,255,.06);backdrop-filter:b
 #playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-height:54px;padding:14px 26px;border:0;border-radius:16px;background:var(--acc);color:#fff;font-weight:600;font-size:17px;box-shadow:0 12px 32px rgba(30,94,255,.4)}
 #stats{position:absolute;left:calc(12px + var(--sal));bottom:calc(12px + var(--sab));margin:0;padding:10px 12px;border-radius:12px;background:rgba(7,9,13,.8);border:1px solid rgba(255,255,255,.07);
 color:#d6e0f2;font:12px/1.5 var(--mono);white-space:pre;pointer-events:none;max-width:calc(100vw - 24px);overflow:hidden}
-@media (prefers-reduced-motion:reduce){#spin{animation-duration:2.4s}video,#bar,#pin,#go{transition:none}}
+@media (prefers-reduced-motion:reduce){#spin{animation-duration:2.4s}video,#bar,#pill,#pin,#go{transition:none}}
 @media (max-height:480px){.card{padding:20px 22px}.logo{width:48px;height:48px;border-radius:14px;margin-bottom:10px}#pinform{margin-top:14px}}
 </style>
 </head>
@@ -72,6 +84,8 @@ color:#d6e0f2;font:12px/1.5 var(--mono);white-space:pre;pointer-events:none;max-
 <button id="go" type="submit" disabled data-i18n="connect">Connect</button>
 </form>
 </div>
+<div id="pause" aria-live="polite"><div class="pi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg></div>
+<h2 data-i18n="paused">Casting is paused</h2><p data-i18n="pausedHint">The picture will be back as soon as casting resumes</p></div>
 <div id="pill" hidden><span id="dot"></span><span id="ptxt"></span></div>
 <div id="bar">
 <button id="bi" type="button" data-i18n-label="stats" aria-label="Stats (S)" title="Stats (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
@@ -96,7 +110,7 @@ var ws = null, pc = null, remoteSet = false, pendingIce = [];
 var timer = null, watchdog = null, discTimer = null, lockTimer = null, hideTimer = null;
 var attempt = 0, joined = false, streamInfo = null, stoppedMsg = null, senderInfo = null, latencyEst = null;
 var prev = null, lastStats = null, latency = null, lastFrameT = 0, lastFrames = 0, pollN = 0, pollTimer = null;
-var wakeLock = null, lastClick = 0;
+var wakeLock = null, lastClick = 0, paused = false;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
 
@@ -108,6 +122,7 @@ var I18N = {
     enterPin: 'Введіть PIN', pinHint: 'Шестизначний код на екрані телефона', wrongPin: 'Невірний PIN',
     pinChanged: 'PIN змінено на телефоні. Введіть новий PIN', locked: 'Забагато спроб. Спробуйте через {n} с',
     connecting: 'Підключення…', reconnecting: 'Перепідключення…', paused: 'Трансляцію призупинено',
+    pausedHint: 'Зображення з’явиться, щойно трансляцію відновлять',
     stopped: 'Трансляцію зупинено на телефоні. Очікування…', notStreaming: 'Трансляцію ще не запущено. Очікування…',
     full: 'Досягнуто ліміту глядачів', error: 'Помилка підключення. Повторюємо…',
     busy: 'Телефон уже транслює стільки глядачам, скільки може. Спробуємо ще раз за кілька секунд…',
@@ -122,7 +137,8 @@ var I18N = {
     connect: 'Connect', stats: 'Stats (S)', fullscreen: 'Full screen (F)', tapToPlay: 'Tap to play',
     enterPin: 'Enter PIN', pinHint: 'The 6-digit code on the phone screen', wrongPin: 'Wrong PIN',
     pinChanged: 'The PIN was changed on the phone. Enter the new PIN', locked: 'Too many attempts. Try again in {n} s',
-    connecting: 'Connecting…', reconnecting: 'Reconnecting…', paused: 'Casting paused',
+    connecting: 'Connecting…', reconnecting: 'Reconnecting…', paused: 'Casting is paused',
+    pausedHint: 'The picture will be back as soon as casting resumes',
     stopped: 'Casting stopped on the phone. Waiting…', notStreaming: 'Casting hasn\'t started yet. Waiting…',
     full: 'Viewer limit reached', error: 'Connection error. Retrying…',
     busy: 'The phone is already streaming to as many viewers as it can. Trying again in a few seconds…',
@@ -161,7 +177,10 @@ Array.prototype.forEach.call(document.querySelectorAll('[data-i18n-label]'), fun
 });
 
 /* ---------- UI ---------- */
-function setState(s) { state = s; stage.setAttribute('data-state', s); }
+function setState(s) {
+  state = s; stage.setAttribute('data-state', s);
+  if (s !== 'playing') { clearTimeout(hideTimer); stage.classList.remove('idle'); }
+}
 function showCard(o) {
   titleEl.textContent = o.title || 'LocalCast';
   subEl.textContent = o.sub || '';
@@ -173,7 +192,22 @@ function showCard(o) {
   if (o.form) { updateGo(); if (o.focus) { try { pinEl.focus(); } catch (e) {} } }
 }
 function hideCard() { card.hidden = true; }
-function showPill(text, color) { ptxt.textContent = text; dot.style.background = color || 'var(--warn)'; pill.hidden = false; }
+// problem: keep the pill on screen while idle (reconnecting); other pills fade out with the controls.
+function showPill(text, color, problem) {
+  ptxt.textContent = text; dot.style.background = color || 'var(--warn)';
+  pill.classList.toggle('problem', !!problem); pill.hidden = false;
+}
+// Pause (state.streaming === false): the phone keeps the PeerConnection and sends black frames at a low rate.
+// Show a still pause screen over the (transparent) video; no reconnect, no stall recovery.
+function setPaused(on) {
+  if (on !== paused) {
+    paused = on;
+    stage.classList.toggle('paused', on);
+    if (!on) lastFrameT = Date.now(); // frames were sparse during the pause: restart the stall clock
+  }
+  if (on && pcUp()) onFrames(); // joined during a pause: show the pause screen even before the first black frame
+}
+function pcUp() { var s = pc && (pc.connectionState || pc.iceConnectionState); return s === 'connected' || s === 'completed'; }
 function live(on) { if (on) stage.classList.add('live'); else stage.classList.remove('live'); }
 function updateGo() { goBtn.disabled = pinEl.value.length !== 6 || !!lockTimer; }
 
@@ -206,7 +240,7 @@ function showPin(err, sub) {
 
 /* ---------- start ---------- */
 function start() {
-  var m = /[#&]pin=(\d{4,8})/.exec(location.hash);
+  var m = /[#&]pin=(\d{6})(?!\d)/.exec(location.hash); // the PIN is always 6 digits, like the form
   if (m) pin = m[1];
   if (location.hash) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
   loadInfo();
@@ -260,6 +294,7 @@ function onMsg(data) {
   switch (m.type) {
     case 'welcome':
       token = m.token; pin = null; joined = true; stoppedMsg = null;
+      setPaused(false); // a pause from before a reconnect is stale; the server re-sends state{streaming:false} if still paused
       try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
       arm(10000);
       break;
@@ -268,11 +303,10 @@ function onMsg(data) {
     case 'sender': senderInfo = m; break;
     case 'state':
       streamInfo = m;
-      if (m.streaming === false) showPill(tr('paused'), 'var(--warn)');
-      else if (state === 'playing') pill.hidden = true;
+      setPaused(m.streaming === false);
       break;
     case 'bye':
-      closePC(); dropWS(); joined = false;
+      closePC(); dropWS(); joined = false; setPaused(false);
       if (m.reason === 'pin_changed') {
         token = null;
         try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
@@ -339,7 +373,7 @@ function onDenied(m) {
 /* ---------- reconnect ---------- */
 function reconnect() {
   if (timer || lockTimer) return;
-  if (joined) { setState('reconnecting'); showPill(tr('reconnecting')); card.hidden = true; }
+  if (joined) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); card.hidden = true; }
   else { setState('connecting'); live(false); showCard(stoppedMsg ? { title: 'LocalCast', sub: stoppedMsg, spin: true } : { title: tr('connecting'), spin: true }); }
   var d = BACK[Math.min(attempt, BACK.length - 1)];
   attempt++;
@@ -375,7 +409,7 @@ function newPC() {
   var chk = function () {
     if (p !== pc) return;
     var s = p.connectionState || p.iceConnectionState;
-    if (s === 'connected' || s === 'completed') { clearTimeout(discTimer); }
+    if (s === 'connected' || s === 'completed') { clearTimeout(discTimer); if (paused) onFrames(); }
     else if (s === 'failed') { clearTimeout(discTimer); lost(); }
     else if (s === 'disconnected') { clearTimeout(discTimer); discTimer = setTimeout(function () { if (p === pc) lost(); }, 3000); }
   };
@@ -385,7 +419,7 @@ function newPC() {
 }
 function lost() {
   closePC();
-  if (state === 'playing') { setState('reconnecting'); showPill(tr('reconnecting')); }
+  if (state === 'playing') { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); }
   reconnect();
 }
 function tune(r) {
@@ -453,8 +487,8 @@ function onFrames() {
   clearTimeout(watchdog);
   attempt = 0;
   hideCard(); pill.hidden = true; live(true);
-  if (streamInfo && streamInfo.streaming === false) showPill(tr('paused'));
   getWake();
+  wake();
 }
 function frameCb(now, md) {
   onFrames();
@@ -466,17 +500,30 @@ function frameCb(now, md) {
 }
 if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(frameCb);
 
+/* Keep the display awake (projector laptops!). The Screen Wake Lock API exists only in secure contexts, and this page is
+   plain HTTP on the LAN, so usually it is missing. Measured on macOS with `pmset -g assertions` while the muted WebRTC
+   video plays from a LAN IP (not a secure context): Chrome 157 holds "Video Wake Lock" (PreventUserIdleDisplaySleep)
+   and Playwright WebKit 27 holds "com.apple.WebCore: HTMLMediaElement playback" (PreventUserIdleDisplaySleep).
+   So the playing <video> itself keeps the display on as long as it stays playing and laid out on screen: never pause it,
+   never display:none it (the pause screen only makes it transparent). Wake Lock is still taken where available. */
+var wakePending = false;
 function getWake() {
   try {
-    if (navigator.wakeLock && !wakeLock) {
-      navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; l.addEventListener('release', function () { wakeLock = null; }); }, function () {});
+    if (navigator.wakeLock && !wakeLock && !wakePending && document.visibilityState === 'visible') {
+      wakePending = true;
+      navigator.wakeLock.request('screen').then(function (l) {
+        wakePending = false; wakeLock = l; l.addEventListener('release', function () { wakeLock = null; });
+      }, function () { wakePending = false; });
     }
-  } catch (e) {}
+  } catch (e) { wakePending = false; }
 }
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState !== 'visible') return;
   if (state === 'playing') getWake();
+  // iOS pauses the video in the background (and after native fullscreen): resume it.
+  if (video.srcObject && video.paused) tryPlay();
   if (state !== 'playing' && state !== 'reconnecting') return;
+  if (paused) return; // frames are sparse while paused
   var f0 = lastFrames;
   setTimeout(function () {
     if (document.visibilityState !== 'visible' || !joined) return;
@@ -492,14 +539,15 @@ function fmt(x, d, u) { return x === null || x === undefined ? tr('na') : x.toFi
 var STALL_MS = 4000;
 function recoverMedia() {
   closePC();
-  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill(tr('reconnecting')); send({ type: 'restart' }); arm(8000); }
+  if (ws && ws.readyState === 1) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); send({ type: 'restart' }); arm(8000); }
   else { dropWS(); reconnect(); }
 }
 function poll() {
   var p = pc;
   if (!p) return;
   if (p.signalingState === 'closed') { if (state === 'playing') lost(); return; }
-  if (state === 'playing' && lastFrameT && Date.now() - lastFrameT > STALL_MS && document.visibilityState === 'visible') {
+  // Not while paused: the phone then sends black frames at a low rate, a gap is expected.
+  if (state === 'playing' && !paused && lastFrameT && Date.now() - lastFrameT > STALL_MS && document.visibilityState === 'visible') {
     recoverMedia();
     return;
   }
@@ -591,15 +639,25 @@ function toggleStats() { statsEl.hidden = !statsEl.hidden; biBtn.classList.toggl
 /* ---------- controls ---------- */
 function toggleFs() {
   var d = document;
-  if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
-  if (stage.requestFullscreen) stage.requestFullscreen().catch(function () {});
-  else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
-  else if (video.webkitEnterFullscreen) { try { video.webkitEnterFullscreen(); } catch (e) {} }
+  try {
+    if (d.fullscreenElement || d.webkitFullscreenElement) {
+      var x = (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      if (x && x.catch) x.catch(function () {});
+      return;
+    }
+    if (stage.requestFullscreen) { var r = stage.requestFullscreen(); if (r && r.catch) r.catch(function () {}); }
+    else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
+    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen(); // iPhone: native player only
+  } catch (e) {}
 }
-function wake() {
+// Projector calm: after 3 s without input while playing, hide cursor, buttons and non-problem pills. Nothing animates then.
+function wake(e) {
+  // Escape and bare modifier keys never bring the controls back (Esc just leaves fullscreen).
+  if (e && e.type === 'keydown' && /^(Escape|Esc|Shift|Control|Alt|Meta|CapsLock)$/.test(e.key || '')) return;
   stage.classList.remove('idle');
   clearTimeout(hideTimer);
   hideTimer = setTimeout(function () { if (state === 'playing') stage.classList.add('idle'); }, 3000);
+  if (e && e.type !== 'pointermove' && state === 'playing') getWake(); // some browsers grant it only after a user gesture
 }
 ['pointermove', 'pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, wake, { passive: true }); });
 stage.addEventListener('click', function (e) {
@@ -610,17 +668,27 @@ stage.addEventListener('click', function (e) {
 $('bf').addEventListener('click', toggleFs);
 biBtn.addEventListener('click', toggleStats);
 document.addEventListener('keydown', function (e) {
-  if (e.target === pinEl || e.ctrlKey || e.metaKey || e.altKey) return;
-  var k = e.key.toLowerCase();
+  if (e.target === pinEl || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  var k = (e.key || '').toLowerCase();
+  // Esc: the browser leaves fullscreen by itself; we only close the stats overlay and never re-enter fullscreen.
+  if (k === 'escape' || k === 'esc') { if (!statsEl.hidden) toggleStats(); return; }
   // 'і'/'ы' and 'а' are the S and F keys on Ukrainian/Russian keyboard layouts.
   if (k === 's' || k === 'і' || k === 'ы') toggleStats();
   else if (k === 'f' || k === 'а') toggleFs();
 });
-document.addEventListener('fullscreenchange', wake);
+// Fullscreen enter/exit (Esc included): show the controls briefly, then calm down again.
+['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) { document.addEventListener(ev, function () { wake(); }); });
+// iPhone native fullscreen pauses the inline video on exit.
+video.addEventListener('webkitendfullscreen', function () { tryPlay(); wake(); });
+// Safari back/forward cache can restore a page whose WebSocket and PeerConnection are gone: start over (token is kept).
+window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
 window.addEventListener('online', function () { if (state !== 'playing' && !timer) { dropWS(); closePC(); attempt = 0; reconnect(); } });
 
 window.__localcast = {
   get state() { return state; },
+  get paused() { return paused; },
+  STALL_MS: STALL_MS,
+  get wakeLock() { return !!wakeLock; },
   get stats() { return lastStats; },
   get pc() { return pc; },
   get ws() { return ws; }
