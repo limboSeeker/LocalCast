@@ -69,6 +69,11 @@ All messages carry machine-readable codes only (`reason`, `type`); the viewer pa
 ## Reconnecting (browser)
 - WS closed, or PeerConnection `failed` / `disconnected` for > 3 s → new WS with `hello{token}` (or `restart` if the WS is still alive).
 - No decoded frame for > 4 s while playing (and not paused) → the media path is considered dead → `restart`.
+- Latency catch-up: while playing, not paused and visible, a jitter buffer (`jitterBufferMs`) > 400 ms or a *measured*
+  latency (`latencyEstimated=false`) > 800 ms in 5 stats polls in a row (1 s apart) → `restart` on the same WS (fresh
+  PeerConnection, empty receive buffer), at most once per 60 s. Any good sample, a pause or a reconnect resets the run;
+  estimated latency never counts. Logged with `console.info`. `?catchup_jb=`, `?catchup_lat=`, `?catchup_ms=` override
+  the numbers (tests).
 - Backoff: 0.5 → 1 → 2 → 4 → 5 s (then every 5 s), reset after video plays successfully.
 - `not_streaming` → retry every 2 s; `bye{stopped}` → retry every 3 s (casting may be turned back on).
 - `token` → drop the token, show the PIN form (if `pinRequired`), otherwise send `hello{}` right away.
@@ -79,8 +84,12 @@ Every viewer costs the phone a hardware encoder and its own Wi-Fi stream, so bac
 - Page hidden (`visibilityState === 'hidden'`) for 8 s → the viewer sends `bye`, closes the PeerConnection and the WS
   (the phone frees the encoder at once) and stays quiet: no reconnect, no watchdog, no stall recovery while hidden.
   8 s leaves room for a quick app switch and the iOS native-fullscreen transition. `?hide_ms=N` overrides it (tests).
-- Not while the video is in picture-in-picture or iPhone native fullscreen (the user is watching); leaving PiP while
-  hidden starts the 8 s again.
+- Not while the video is in picture-in-picture or iPhone native fullscreen, nor while the page is in fullscreen
+  (`fullscreenElement`: a window full screen on a projector or second display can be reported hidden when covered) —
+  the user is watching. Leaving PiP or fullscreen while hidden starts the 8 s again.
+- Never with `keep=1`: `?keep=1` or `#keep=1` (e.g. `http://<ip>:<port>/#pin=123456&keep=1`) for a projector or
+  kiosk page. Remembered for the tab (sessionStorage), so it survives reconnects and reloads after the hash is
+  stripped; `keep=0` turns it off.
 - Shown again → at once the normal "Connecting" card and a new WS with `hello{token}` (no PIN), new PeerConnection,
   so latency is fresh rather than a resumed stale buffer. A pause (`state{streaming:false}`) is re-sent after `welcome`.
 - A shorter hide changes nothing (same WS and PeerConnection).

@@ -56,7 +56,7 @@ class Sock {
 }
 
 export function startMock(port = 8099) {
-  const st = { streaming: true, paused: false, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [], joins: 0, byes: 0, leaves: 0, lastHello: null };
+  const st = { streaming: true, paused: false, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [], joins: 0, byes: 0, leaves: 0, restarts: 0, lastHello: null };
   const log = (...a) => { st.log.push(a.join(' ')); if (process.env.MOCK_DEBUG) console.log(...a); };
 
   const toPhone = (o) => st.phone && st.phone.send(o);
@@ -94,7 +94,7 @@ export function startMock(port = 8099) {
     if (ws !== st.viewer) return;
     if (m.type === 'answer') toPhone({ cmd: 'answer', sdp: m.sdp });
     else if (m.type === 'ice') toPhone({ cmd: 'ice', candidate: m.candidate });
-    else if (m.type === 'restart') toPhone({ cmd: 'newViewer' });
+    else if (m.type === 'restart') { st.restarts++; toPhone({ cmd: 'newViewer' }); }
     else if (m.type === 'report') st.reports.push(m.stats);
     else if (m.type === 'bye') { st.byes++; ws.close(); }
   }
@@ -137,7 +137,7 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
     if (u.pathname === '/api/info') return j({ name: 'LocalCast', pinRequired: true, streaming: st.streaming, protocol: 1 });
     if (u.pathname === '/health') { res.writeHead(200); return res.end('ok'); }
     if (u.pathname === '/mock/state') return j({ streaming: st.streaming, viewer: !!st.viewer, phone: !!st.phone, reports: st.reports.length, lastReport: st.reports.at(-1) || null,
-      joins: st.joins, byes: st.byes, leaves: st.leaves, lastHello: st.lastHello });
+      joins: st.joins, byes: st.byes, leaves: st.leaves, restarts: st.restarts, lastHello: st.lastHello });
     if (req.method === 'POST' && u.pathname === '/mock/drop') { if (st.viewer) st.viewer.kill(); return j({ ok: true }); }
     if (req.method === 'POST' && u.pathname === '/mock/stop') {
       st.streaming = false; // tokens survive a stop, like the app (PinGuard is process-wide)
@@ -153,7 +153,7 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       return j({ ok: true });
     }
     if (req.method === 'POST' && u.pathname === '/mock/busy') { st.busy = u.searchParams.get('on') !== '0'; return j({ ok: true }); }
-    if (req.method === 'POST' && u.pathname === '/mock/reset') { if (st.paused) toPhone({ cmd: 'pause', on: false }); st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.paused = false; st.busy = false; st.reports = []; st.joins = 0; st.byes = 0; st.leaves = 0; st.lastHello = null; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/reset') { if (st.paused) toPhone({ cmd: 'pause', on: false }); st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.paused = false; st.busy = false; st.reports = []; st.joins = 0; st.byes = 0; st.leaves = 0; st.restarts = 0; st.lastHello = null; return j({ ok: true }); }
     res.writeHead(404); res.end('not found');
   });
 

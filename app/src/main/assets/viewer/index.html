@@ -113,8 +113,27 @@ var prev = null, lastStats = null, latency = null, lastFrameT = 0, lastFrames = 
 var wakeLock = null, lastClick = 0, paused = false;
 // A tab hidden this long leaves (bye) so the phone frees its encoder and Wi-Fi; it rejoins with the token when shown again.
 // Long enough for a quick app switch or the iOS native-fullscreen transition. ?hide_ms=N overrides it (tests).
-var HIDE_RELEASE_MS = (function () { var q = /[?&]hide_ms=(\d+)/.exec(location.search); return q ? +q[1] : 8000; })();
+function qnum(name, def) { var q = new RegExp('[?&]' + name + '=(\\d+)').exec(location.search); return q ? +q[1] : def; }
+var HIDE_RELEASE_MS = qnum('hide_ms', 8000);
 var released = false, releaseTimer = null, hiddenAt = 0;
+// ?keep=1 (or #keep=1 next to #pin=): never release when hidden, e.g. a projector or second display whose window the
+// browser reports hidden. Remembered for the tab (sessionStorage), so it survives reloads after the hash was stripped;
+// keep=0 turns it off again.
+var KEEP_KEY = 'localcast.keep';
+var keep = (function () {
+  var m = /[?&]keep=([01])(?!\d)/.exec(location.search) || /[#&]keep=([01])(?!\d)/.exec(location.hash);
+  try {
+    if (m) { if (m[1] === '1') sessionStorage.setItem(KEEP_KEY, '1'); else sessionStorage.removeItem(KEEP_KEY); }
+    else return sessionStorage.getItem(KEEP_KEY) === '1';
+  } catch (e) {}
+  return !!m && m[1] === '1';
+})();
+// Latency catch-up: a jitter buffer or a measured latency that stays high for CATCHUP_N stats polls in a row (1 s apart)
+// means the receive buffer has grown and will not drain on its own: restart the PeerConnection (fresh, empty buffer).
+// At most once per CATCHUP_COOLDOWN_MS. ?catchup_jb= ?catchup_lat= ?catchup_ms= override the numbers (tests).
+var CATCHUP = { jb: qnum('catchup_jb', 400), lat: qnum('catchup_lat', 800), n: 5, cooldown: qnum('catchup_ms', 60000) };
+var CATCHUP_COOLDOWN_MS = CATCHUP.cooldown;
+var catchHist = [], lastCatchUp = 0, catchUps = 0;
 
 try { token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
 
@@ -206,6 +225,7 @@ function showPill(text, color, problem) {
 function setPaused(on) {
   if (on !== paused) {
     paused = on;
+    catchHist = [];
     stage.classList.toggle('paused', on);
     if (!on) lastFrameT = Date.now(); // frames were sparse during the pause: restart the stall clock
   }
@@ -393,7 +413,7 @@ function reconnect() {
 /* ---------- WebRTC ---------- */
 function closePC() {
   clearTimeout(discTimer);
-  var p = pc; pc = null; remoteSet = false; pendingIce = []; prev = null; latency = null; latencyEst = null; lastFrames = 0;
+  var p = pc; pc = null; remoteSet = false; pendingIce = []; prev = null; latency = null; latencyEst = null; lastFrames = 0; catchHist = [];
   if (p) {
     p.ontrack = p.onicecandidate = p.onconnectionstatechange = p.oniceconnectionstatechange = null;
     try { p.close(); } catch (e) {}
@@ -528,8 +548,11 @@ function getWake() {
    background tabs (e.g. the same link opened three times) degrade the one actually watched. */
 function pageHidden() { return document.visibilityState === 'hidden'; }
 // Picture-in-picture (and iPhone native fullscreen, which may report the page hidden): the user is still watching.
+// So is a page in fullscreen (a browser window full screen on a projector or second display can be reported hidden
+// when another window covers its "main" one), and a page opened with keep=1.
+function fullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
 function watching() {
-  return !!(document.pictureInPictureElement || video.webkitDisplayingFullscreen ||
+  return !!(keep || fullscreen() || document.pictureInPictureElement || video.webkitDisplayingFullscreen ||
     video.webkitPresentationMode === 'picture-in-picture' || video.webkitPresentationMode === 'fullscreen');
 }
 function armRelease() {
@@ -589,6 +612,38 @@ function recoverMedia() {
   closePC();
   if (ws && ws.readyState === 1) { setState('reconnecting'); showPill(tr('reconnecting'), 0, true); send({ type: 'restart' }); arm(8000); }
   else { dropWS(); reconnect(); }
+}
+// One stats sample for the catch-up decision: 'bad' (buffer or measured latency over the limit), 'good', or null
+// (nothing usable: no jitter-buffer delta and no measured latency; it neither counts nor resets the run).
+function catchUpVerdict(s, cfg) {
+  var jb = num(s.jitterBufferMs), lat = s.latencyEstimated ? null : num(s.latencyMs);
+  if ((jb !== null && jb > cfg.jb) || (lat !== null && lat > cfg.lat)) return 'bad';
+  return jb !== null || lat !== null ? 'good' : null;
+}
+// Pure: restart when the last cfg.n samples are all bad and the last catch-up (lastAt, 0 = never) is cfg.cooldown ago.
+function shouldCatchUp(history, now, lastAt, cfg) {
+  cfg = cfg || CATCHUP;
+  if (history.length < cfg.n) return false;
+  for (var i = history.length - cfg.n; i < history.length; i++) if (catchUpVerdict(history[i], cfg) !== 'bad') return false;
+  return !lastAt || now - lastAt >= cfg.cooldown;
+}
+// Called with every stats sample (and by debugStats in tests).
+function catchUpSample(s) {
+  if (state !== 'playing' || paused || document.visibilityState !== 'visible' || !pc) { catchHist = []; return; }
+  var v = catchUpVerdict(s, CATCHUP);
+  if (v === null) return;
+  if (v === 'good') { catchHist = []; return; }
+  catchHist.push(s);
+  if (catchHist.length > CATCHUP.n) catchHist.shift();
+  var now = Date.now();
+  if (!shouldCatchUp(catchHist, now, lastCatchUp, CATCHUP)) return;
+  var r = function (x) { return x === null || x === undefined ? 'n/a' : Math.round(x); };
+  console.info('LocalCast catch-up: ' + catchHist.length + ' polls over the limit (jitter buffer ' +
+    catchHist.map(function (x) { return r(x.jitterBufferMs); }).join('/') + ' ms > ' + CATCHUP.jb + ', latency ' +
+    catchHist.map(function (x) { return x.latencyEstimated ? 'est' : r(x.latencyMs); }).join('/') + ' ms > ' + CATCHUP.lat +
+    '): restarting the connection');
+  lastCatchUp = now; catchUps++; catchHist = [];
+  recoverMedia();
 }
 function poll() {
   var p = pc;
@@ -651,6 +706,7 @@ function poll() {
     lastStats = s;
     if (!statsEl.hidden) renderStats(s);
     if (++pollN % 2 === 0 && state === 'playing') report(s);
+    catchUpSample(s);
   }).catch(function () {});
 }
 function renderStats(s) {
@@ -725,7 +781,10 @@ document.addEventListener('keydown', function (e) {
   else if (k === 'f' || k === 'а') toggleFs();
 });
 // Fullscreen enter/exit (Esc included): show the controls briefly, then calm down again.
-['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) { document.addEventListener(ev, function () { wake(); }); });
+// Leaving fullscreen while hidden (e.g. Esc on a covered projector window) starts the hidden-tab countdown again.
+['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) {
+  document.addEventListener(ev, function () { wake(); if (pageHidden() && !fullscreen()) armRelease(); });
+});
 // iPhone native fullscreen pauses the inline video on exit.
 video.addEventListener('webkitendfullscreen', function () { tryPlay(); wake(); });
 // Safari back/forward cache can restore a page whose WebSocket and PeerConnection are gone: start over (token is kept).
@@ -738,6 +797,14 @@ window.__localcast = {
   get released() { return released; },
   STALL_MS: STALL_MS,
   HIDE_RELEASE_MS: HIDE_RELEASE_MS,
+  CATCHUP: CATCHUP,
+  CATCHUP_COOLDOWN_MS: CATCHUP_COOLDOWN_MS,
+  get keep() { return keep; },
+  get catchUps() { return catchUps; },
+  get catchUpRun() { return catchHist.length; },
+  shouldCatchUp: shouldCatchUp,
+  // Tests: feed a stats sample ({jitterBufferMs, latencyMs, latencyEstimated}) into the same catch-up path as poll().
+  debugStats: function (s) { catchUpSample(s || {}); },
   get wakeLock() { return !!wakeLock; },
   get stats() { return lastStats; },
   get pc() { return pc; },
