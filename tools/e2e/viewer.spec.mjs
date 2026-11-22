@@ -311,3 +311,84 @@ test('projector calm: a reconnecting pill stays visible (not idle), calm again a
   await v.waitForFunction(() => document.getElementById('stage').classList.contains('idle'), null, { timeout: 5000 });
   assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
 });
+
+// Emulates a background tab: Playwright pages are always visible, so override document.visibilityState and fire the event.
+// Returns the page state right after the event (synchronous handlers have run).
+const setVisibility = (page, vis) => page.evaluate((v) => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => v });
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => v === 'hidden' });
+  document.dispatchEvent(new Event('visibilitychange'));
+  return window.__localcast.state;
+}, vis);
+const mockState = async () => (await fetch(mock.url + '/mock/state')).json();
+
+test('uk: hidden tab past the threshold leaves (bye), stays quiet, rejoins with the token when shown', async () => {
+  const v = await viewer('?hide_ms=1500#pin=123456');
+  await playing(v);
+  assert.equal(await v.evaluate(() => window.__localcast.HIDE_RELEASE_MS), 1500);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  const s0 = await mockState();
+  assert.equal(s0.joins, 1);
+  await setVisibility(v, 'hidden');
+  await v.waitForFunction(() => window.__localcast.released && window.__localcast.state === 'released', null, { timeout: 5000 });
+  const s1 = await mockState();
+  assert.equal(s1.byes, 1, 'viewer said bye');
+  assert.equal(s1.viewer, false, 'mock freed the viewer');
+  assert.ok(await v.evaluate(() => !window.__localcast.pc && !window.__localcast.ws));
+  // Well past the reconnect backoff and the stall limit: no reconnect while hidden.
+  const pcs = await phone.evaluate(() => window.pcs);
+  await v.waitForTimeout(6000);
+  const s2 = await mockState();
+  assert.equal(s2.joins, 1, 'no rejoin while hidden');
+  assert.equal(s2.viewer, false);
+  assert.equal(await phone.evaluate(() => window.pcs), pcs, 'phone made no new PeerConnection');
+  assert.equal(await state(v), 'released');
+  // Shown again: the normal connecting card at once, then a fresh connection with the stored token (no PIN form).
+  assert.equal(await setVisibility(v, 'visible'), 'connecting');
+  assert.equal(await v.locator('#title').innerText(), 'Підключення…');
+  await v.waitForFunction(() => window.__localcast.pc && window.__localcast.pc !== window.__oldpc && window.__localcast.state === 'playing'
+    && window.__localcast.stats && window.__localcast.stats.framesDecoded > 10, null, { timeout: 20000 });
+  assert.ok(!(await v.locator('#pinform').isVisible()));
+  const s3 = await mockState();
+  assert.equal(s3.joins, 2);
+  assert.equal(s3.lastHello, 'token');
+  assert.equal(await v.evaluate(() => window.__localcast.released), false);
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
+});
+
+test('a short hide (below the threshold) keeps the same connection', async () => {
+  const v = await viewer('?hide_ms=3000#pin=123456');
+  await playing(v);
+  await v.evaluate(() => { window.__oldpc = window.__localcast.pc; });
+  await setVisibility(v, 'hidden');
+  await v.waitForTimeout(1500);
+  assert.equal(await setVisibility(v, 'visible'), 'playing');
+  await v.waitForTimeout(3000); // past the moment the release timer would have fired
+  assert.equal(await state(v), 'playing');
+  assert.ok(await v.evaluate(() => window.__localcast.pc === window.__oldpc && !window.__localcast.released));
+  const s = await mockState();
+  assert.equal(s.joins, 1);
+  assert.equal(s.byes, 0);
+  assert.equal(s.leaves, 0);
+  assert.equal(s.viewer, true);
+  assert.deepEqual(errors, []);
+});
+
+test('hidden while in picture-in-picture keeps playing; leaving PiP in the background releases', async () => {
+  const v = await viewer('?hide_ms=1000#pin=123456');
+  await playing(v);
+  await v.evaluate(() => Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, get: () => document.getElementById('v') }));
+  await setVisibility(v, 'hidden');
+  await v.waitForTimeout(2500);
+  assert.equal(await state(v), 'playing');
+  assert.equal((await mockState()).byes, 0);
+  await v.evaluate(() => {
+    Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, get: () => null });
+    document.getElementById('v').dispatchEvent(new Event('leavepictureinpicture'));
+  });
+  await v.waitForFunction(() => window.__localcast.released, null, { timeout: 5000 });
+  assert.equal((await mockState()).byes, 1);
+  await setVisibility(v, 'visible');
+  await playing(v, 10);
+  assert.deepEqual(errors.filter((e) => !/WebSocket connection to .* failed/.test(e)), []);
+});

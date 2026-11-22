@@ -74,6 +74,17 @@ All messages carry machine-readable codes only (`reason`, `type`); the viewer pa
 - `token` → drop the token, show the PIN form (if `pinRequired`), otherwise send `hello{}` right away.
 - A new `hello` with a token that already has an active connection replaces it (the server closes the old one).
 
+## Hidden tabs (browser)
+Every viewer costs the phone a hardware encoder and its own Wi-Fi stream, so background tabs degrade the watched one.
+- Page hidden (`visibilityState === 'hidden'`) for 8 s → the viewer sends `bye`, closes the PeerConnection and the WS
+  (the phone frees the encoder at once) and stays quiet: no reconnect, no watchdog, no stall recovery while hidden.
+  8 s leaves room for a quick app switch and the iOS native-fullscreen transition. `?hide_ms=N` overrides it (tests).
+- Not while the video is in picture-in-picture or iPhone native fullscreen (the user is watching); leaving PiP while
+  hidden starts the 8 s again.
+- Shown again → at once the normal "Connecting" card and a new WS with `hello{token}` (no PIN), new PeerConnection,
+  so latency is fresh rather than a resumed stale buffer. A pause (`state{streaming:false}`) is re-sent after `welcome`.
+- A shorter hide changes nothing (same WS and PeerConnection).
+
 ## Security
 - 6-digit PIN; 5 wrong attempts from one IP → 60 s lockout; constant-time comparison.
 - 128-bit token, valid until the PIN changes ("New PIN") or the app restarts. The PIN and tokens survive stopping/starting the cast, so viewers come back on their own.
