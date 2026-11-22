@@ -29,4 +29,15 @@ class IcePathTest {
         assertTrue(IcePath.shouldSend(usbCandidate, viaUsb = false, localAddress = "192.168.0.107"))
         assertTrue(IcePath.shouldSend(wifiCandidate, viaUsb = false, localAddress = "192.168.0.107"))
     }
+
+    @Test
+    fun cableViewersUseOnlyCableOrHiddenRemoteCandidates() {
+        val cableRemote = "candidate:3 1 udp 2122260223 192.168.42.75 55555 typ host"
+        val wifiRemote = "candidate:4 1 udp 2122194687 192.168.0.104 55556 typ host"
+        val mdns = "candidate:5 1 udp 2122260223 3f2a-11.local 55557 typ host"
+        assertTrue(IcePath.shouldUseRemote(cableRemote, viaUsb = true, localAddress = "192.168.42.129"))
+        assertFalse(IcePath.shouldUseRemote(wifiRemote, viaUsb = true, localAddress = "192.168.42.129"))
+        assertTrue(IcePath.shouldUseRemote(mdns, viaUsb = true, localAddress = "192.168.42.129"))
+        assertTrue(IcePath.shouldUseRemote(wifiRemote, viaUsb = false, localAddress = "192.168.0.107"))
+    }
 }

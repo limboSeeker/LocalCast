@@ -142,7 +142,13 @@ var catchCooldown = CATCHUP.cooldown;
 // the page's own host. Preference usb > ethernet > wifi/hotspot > other; vpn is never used.
 // ?probe_ms= ?switch_hold_ms= override the timings (tests).
 var PATH_RANK = { usb: 0, ethernet: 1, wifi: 2, hotspot: 2, other: 3 };
-var PROBE_MS = qnum('probe_ms', 3000), PROBE_TIMEOUT_MS = 1200, SWITCH_HOLD_MS = qnum('switch_hold_ms', 10000);
+// A probe allows 2.5 s: it runs exactly when a link is degrading, a tighter limit tore down sessions that were only slow.
+var PROBE_MS = qnum('probe_ms', 3000), PROBE_TIMEOUT_MS = 2500, SWITCH_HOLD_MS = qnum('switch_hold_ms', 10000);
+// Only a page opened by an IP address can move to the device's other addresses (the server accepts WebSockets from
+// pages on its own IPs); opened by a name (localhost, a .local name) it keeps its one path.
+var multipath = /^(\d{1,3}\.){3}\d{1,3}$/.test(location.hostname);
+// Failed upgrade probes back off per address: 3 s, 6 s ... up to a minute (a cable address this viewer can't use).
+var probeFails = {};
 var BAD_HOST_MS = 30000, SWITCH_TIMEOUT_MS = 4000;
 function withPort(h) { return /:\d+$/.test(h) ? h : h + ':80'; }
 var pageHost = withPort(location.host), curHost = pageHost, addrs = [], srvPort = null;
@@ -463,6 +469,7 @@ function setAddresses(list, port) {
 // Every host worth trying, best first: the device's addresses and the page's own host; hosts that failed recently
 // go last, the current one first among equals.
 function pathHosts() {
+  if (!multipath) return [pageHost];
   var now = Date.now(), seen = {}, list = [];
   addrs.map(function (a) { return a.host; }).concat([pageHost]).forEach(function (h) { if (!seen[h]) { seen[h] = 1; list.push(h); } });
   var key = function (h) { return [badHost[h] > now ? 1 : 0, rankOf(h), h === curHost ? 0 : 1]; };
@@ -520,6 +527,8 @@ function restartOrMove() {
   var my = ++pickGen, w = ws;
   probe(curHost).then(function (ok) {
     if (my !== pickGen || released || ws !== w) return;
+    // The session recovered while probing (e.g. the server renegotiated): leave it alone.
+    if (pc && pcUp()) return;
     if (ok && ws && ws.readyState === 1) { send({ type: 'restart' }); arm(8000); return; }
     console.info('LocalCast path: ' + curHost + ' does not answer');
     dropWS(); closePC(); connectAny(curHost);
@@ -533,7 +542,7 @@ function dropPending() {
 // twice in a row gets a new socket (hello with the token; the server replaces the old connection). Not within
 // SWITCH_HOLD_MS of the last switch, never while hidden or released.
 function upgradeTick() {
-  if (upBusy) return;
+  if (upBusy || !multipath) return;
   if (released || pageHidden() || !joined || state !== 'playing' || pendingWs || !ws || ws.readyState !== 1) { upRun = null; return; }
   if (Date.now() - lastSwitchAt < SWITCH_HOLD_MS) return;
   var now = Date.now(), cur = rankOf(curHost), seen = {};
@@ -546,7 +555,12 @@ function upgradeTick() {
   Promise.all(better.map(probe)).then(function (ok) {
     upBusy = false;
     if (released || pageHidden() || !joined || state !== 'playing' || pendingWs) { upRun = null; return; }
-    var h = null;
+    var h = null, t = Date.now();
+    for (var j = 0; j < better.length; j++) {
+      if (ok[j]) { delete probeFails[better[j]]; continue; }
+      probeFails[better[j]] = (probeFails[better[j]] || 0) + 1;
+      badHost[better[j]] = t + Math.min(60000, PROBE_MS * Math.pow(2, probeFails[better[j]] - 1));
+    }
     for (var i = 0; i < better.length; i++) if (ok[i]) { h = better[i]; break; }
     if (!h) { upRun = null; return; }
     upRun = upRun && upRun.host === h ? { host: h, n: upRun.n + 1 } : { host: h, n: 1 };
@@ -692,6 +706,15 @@ function jbReset(all) {
   if (all) { var from = jb.target; jb = jbInit(); if (from) { jbChanges++; jbLog(from, 'new path'); } return; }
   jb.lost = null; jb.dropped = null; jb.rtts = [];
 }
+// Hardware H.265 decoding for WebRTC (MediaCapabilities); checked once at load, false until known.
+var hevcFast = false;
+try {
+  if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
+    navigator.mediaCapabilities.decodingInfo({ type: 'webrtc', video: { contentType: 'video/h265', width: 1920, height: 1080,
+      bitrate: 6000000, framerate: 60 } }).then(function (r) { hevcFast = !!(r && r.supported && r.powerEfficient); },
+      function () {});
+  }
+} catch (e) {}
 function preferCodecs(p) {
   try {
     if (!window.RTCRtpReceiver || !RTCRtpReceiver.getCapabilities) return;
@@ -699,6 +722,9 @@ function preferCodecs(p) {
     if (!caps || !caps.codecs) return;
     var rank = function (c) {
       var mt = c.mimeType.toLowerCase();
+      // H.265 first only where it decodes in hardware (else it stays behind H.264): ~30% fewer bits for the same
+      // picture. Browsers without it never list it; the sender falls back to H.264, then VP8.
+      if (mt === 'video/h265') return hevcFast ? -1 : 2;
       if (mt === 'video/h264') return /packetization-mode=1/.test(c.sdpFmtpLine || '') ? 0 : 1;
       if (/rtx|red|ulpfec|flexfec/.test(mt)) return 3;
       return 2;

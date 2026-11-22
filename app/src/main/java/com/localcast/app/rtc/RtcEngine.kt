@@ -130,6 +130,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     /** A/B switches, read when a broadcast starts (debug builds: adb setprop, see [DebugKnobs]). */
     @Volatile internal var qualityLadder = true
 
+    /** Local addresses last reported by [onLocalAddressesChanged] (engine thread). */
+    private var knownAddresses: Set<String> = emptySet()
+
     /** FlexFEC offered to browsers that receive it (debug knob `fec`); see [fieldTrials]. */
     @Volatile private var flexFec = false
     private var currentFps = 0
@@ -200,7 +203,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         send: (ServerMessage) -> Unit,
     ): ViewerSession? {
         if (!isStreaming) return null
-        val viaUsb = IcePath.isUsb(localAddress, NetAddresses.current())
+        val current = NetAddresses.current()
+        val viaUsb = IcePath.isUsb(localAddress, current)
+        post { if (knownAddresses.isEmpty()) knownAddresses = current.map { it.ip }.toSet() }
         val peer = ViewerPeer(viewerId, remoteAddress, this, localAddress, viaUsb, send)
         if (viaUsb) Log.i(DIAG_TAG, "$viewerId on the USB cable ($localAddress)")
         post {
@@ -552,7 +557,11 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
      * over another path instead of waiting for connection timeouts.
      */
     fun onLocalAddressesChanged(ips: Set<String>) = post {
-        val gone = peers.values.filter { it.localAddress != null && it.localAddress !in ips }
+        // Only addresses that were listed and are gone now: loopback (adb forward, a browser on this
+        // device) and other unlisted addresses are never "lost".
+        val vanished = knownAddresses - ips
+        knownAddresses = ips
+        val gone = peers.values.filter { it.localAddress != null && it.localAddress in vanished }
         gone.forEach {
             Log.i(DIAG_TAG, "${it.viewerId}: path ${it.localAddress} is gone, closing")
             it.closeNow()
@@ -704,6 +713,14 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         }
 
         override fun onEncoderFailed(codecName: String, reason: String, otherEncodersActive: Boolean) {
+            if (codecName == encoderFactory?.hardwareH265Name) {
+                // First: an HEVC refusal (its own session limit, or broken) says nothing about H.264's
+                // budget. libwebrtc switches the session to H.264 by itself; new viewers are not
+                // offered H.265 again during this broadcast.
+                Log.e(TAG, "hardware HEVC encoder $codecName failed: $reason — H.264 from now on")
+                post { encoderFactory?.setH265Disabled(true) }
+                return
+            }
             if (otherEncodersActive) {
                 // The device's limit of concurrent hardware encoders: this viewer falls back to VP8 by
                 // itself (libwebrtc encoder switch), everybody else keeps H.264, and later viewers
@@ -719,13 +736,6 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                     }
                     pollUnconfirmedSoon()
                 }
-                return
-            }
-            if (codecName == encoderFactory?.hardwareH265Name) {
-                // libwebrtc switches the session to the next negotiated codec (H.264) by itself;
-                // new viewers are not offered H.265 again during this broadcast.
-                Log.e(TAG, "hardware HEVC encoder $codecName failed: $reason — H.264 from now on")
-                post { encoderFactory?.setH265Disabled(true) }
                 return
             }
             Log.e(TAG, "hardware encoder $codecName failed: $reason — VP8 for new sessions, retry in ${H264_RETRY_S}s")

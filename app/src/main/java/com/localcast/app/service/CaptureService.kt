@@ -139,7 +139,7 @@ class CaptureService : LifecycleService() {
         // Every local path to this device (USB cable, Wi-Fi, hotspot...): viewer pages move to the
         // best one that answers and fall back when it goes away.
         val sig = Signaling(pinGuard, eng, { pinRequired }, signalingListener, addresses = {
-            CastStateStore.state.value.addresses.toDtos() to boundPort
+            CastStateStore.state.value.addresses.filter { it.kind != AddressKind.VPN }.toDtos() to boundPort
         })
         signaling = sig
         val srv = HttpServer(assets, sig) {
@@ -147,7 +147,7 @@ class CaptureService : LifecycleService() {
                 name = "LocalCast · ${Build.MODEL}",
                 pinRequired = pinRequired,
                 streaming = eng.isStreaming,
-                addresses = CastStateStore.state.value.addresses.toDtos(),
+                addresses = CastStateStore.state.value.addresses.filter { it.kind != AddressKind.VPN }.toDtos(),
                 port = boundPort,
             )
         }
@@ -288,6 +288,7 @@ class CaptureService : LifecycleService() {
     }
 
     private suspend fun teardown(error: String?) {
+        boundPort = null
         run {
             startJob?.cancelAndJoin() // a start still in flight must not bind the port after we stop
             jobs.forEach { it.cancel() }

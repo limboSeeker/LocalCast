@@ -21,4 +21,17 @@ object IcePath {
      */
     fun shouldSend(candidateSdp: String, viaUsb: Boolean, localAddress: String?): Boolean =
         !viaUsb || localAddress == null || candidateAddress(candidateSdp) == localAddress
+
+    /**
+     * Whether to use a viewer's candidate. A viewer on the cable: only its addresses in the cable's
+     * subnet (/24) or hidden ones (mDNS .local — the browser's checks then arrive over the cable),
+     * so a pair over Wi-Fi is never built from our side.
+     */
+    fun shouldUseRemote(candidateSdp: String, viaUsb: Boolean, localAddress: String?): Boolean {
+        if (!viaUsb || localAddress == null) return true
+        val addr = candidateAddress(candidateSdp) ?: return true
+        if (addr.endsWith(".local")) return true
+        val subnet = localAddress.substringBeforeLast('.', "")
+        return subnet.isNotEmpty() && addr.substringBeforeLast('.', "") == subnet
+    }
 }

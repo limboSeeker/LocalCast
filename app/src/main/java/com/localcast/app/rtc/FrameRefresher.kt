@@ -63,6 +63,8 @@ class FrameRefresher(
 
     /** Push the current picture again (e.g. a viewer just connected). Safe from any thread. */
     fun requestFrame() {
+        // A new viewer (or a keyframe request) should sharpen at the fast rate again.
+        helper.handler.post { lastChangeAtMs = SystemClock.elapsedRealtime() }
         helper.forceFrame()
     }
 

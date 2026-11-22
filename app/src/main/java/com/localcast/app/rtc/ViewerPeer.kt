@@ -253,6 +253,7 @@ internal class ViewerPeer(
 
     override fun onRemoteIce(candidate: IceCandidateDto) = engine.post {
         if (candidate.candidate.isBlank()) return@post // end-of-candidates marker
+        if (!IcePath.shouldUseRemote(candidate.candidate, viaUsb, localAddress)) return@post
         val ice = IceCandidate(candidate.sdpMid ?: "0", candidate.sdpMLineIndex, candidate.candidate)
         val peer = pc ?: return@post
         if (remoteDescriptionSet) {
