@@ -257,6 +257,7 @@ private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: Snackb
             ConnectBlock(s.cast, snackbar, qrSide, a.show)
             Spacer(Modifier.height(8.dp))
             HealthCard(s.cast, a.health)
+            BatteryAdvice(Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -288,6 +289,7 @@ private fun LiveWideColumn(s: ScreenState, snackbar: SnackbarHostState, a: Actio
             ConnectBlock(state, snackbar, qrSide, a.show, large = true)
             Spacer(Modifier.height(16.dp))
             HealthCard(state, a.health, maxViewers = 0)
+            BatteryAdvice(Modifier.padding(top = 4.dp))
             // With no one connected the status card already says so.
             if (groups.isNotEmpty()) {
                 Spacer(Modifier.height(24.dp))
@@ -321,6 +323,7 @@ private fun LiveTwoPane(padding: PaddingValues, s: ScreenState, snackbar: Snackb
                     PausedExplanation(state)
                 } else {
                     HealthCard(state, a.health, grid = true, maxViewers = 0)
+                    BatteryAdvice(Modifier.padding(top = 4.dp))
                 }
             }
             val bottom = Modifier.padding(bottom = 16.dp, top = 4.dp)
