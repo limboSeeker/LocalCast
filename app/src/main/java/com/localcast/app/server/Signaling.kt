@@ -35,6 +35,7 @@ class Signaling(
 
     private class Conn(val viewerId: String, val token: String, val out: Channel<ServerMessage>) {
         @Volatile var writer: Job? = null
+        @Volatile var session: ViewerSession? = null
     }
 
     private val lock = Any()
@@ -58,7 +59,8 @@ class Signaling(
     }
 
     suspend fun handle(socket: DefaultWebSocketServerSession, remoteIp: String) = coroutineScope {
-        val out = Channel<ServerMessage>(Channel.UNLIMITED)
+        // Bounded: a viewer that stops reading is dropped instead of buffering without limit.
+        val out = Channel<ServerMessage>(OUT_QUEUE)
         val writer = launch { writeLoop(socket, out) }
         var conn: Conn? = null
         var session: ViewerSession? = null
@@ -107,7 +109,10 @@ class Signaling(
                 return@coroutineScope
             }
             conn = newConn
-            replaced?.out?.close() // old socket is closed by its own writer; its handle() cleans up
+            // Same browser reconnecting: free its old PeerConnection (and hardware encoder) before the
+            // new one is admitted; the old socket is closed by its own writer, its handle() cleans up.
+            replaced?.session?.close()
+            replaced?.out?.close()
 
             out.send(ServerMessage.Welcome(token, viewerId))
 
@@ -121,7 +126,7 @@ class Signaling(
                             }
                         }
                     }
-                    newConn.out.trySend(msg)
+                    if (newConn.out.trySend(msg).isFailure) newConn.out.close()
                     // A session may turn the viewer away later (device at capacity): close the socket
                     // after the message, as for every other denial.
                     if (msg is ServerMessage.Denied) newConn.out.close()
@@ -136,6 +141,7 @@ class Signaling(
                 out.send(ServerMessage.Denied(DenyReason.NOT_STREAMING))
                 return@coroutineScope
             }
+            newConn.session = session
 
             receiveLoop(socket, session)
         } catch (e: CancellationException) {
@@ -227,5 +233,7 @@ class Signaling(
         const val HELLO_TIMEOUT_MS = 10_000L
         const val WRONG_PIN_DELAY_MS = 300L
         const val FLUSH_TIMEOUT_MS = 1_000L
+        /** Outgoing messages queued per viewer (stats every 2 s, state, ICE): a stuck reader is dropped. */
+        const val OUT_QUEUE = 64
     }
 }

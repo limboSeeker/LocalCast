@@ -14,6 +14,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.net.wifi.WifiManager
+import android.os.SystemClock
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -36,6 +37,7 @@ import com.localcast.app.server.Signaling
 import com.localcast.app.server.ViewerStats
 import com.localcast.app.settings.StreamSettings
 import com.localcast.app.ui.MainActivity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -106,42 +108,54 @@ class CaptureService : LifecycleService() {
 
         CastStateStore.update { CastState(phase = CastPhase.STARTING, pin = pinGuard.pin) }
         startJob = lifecycleScope.launch {
-            val app = application as LocalCastApp
-            val settings = app.settings.current()
-            pinRequired = settings.requirePin
-            pauseOnLock = settings.pauseOnLock
-            acquireLocks()
-            registerScreenReceiver()
-
-            val eng = RtcEngine(this@CaptureService, engineListener)
-            engine = eng
-            eng.start(data, settings)
-
-            val sig = Signaling(pinGuard, eng, { pinRequired }, signalingListener)
-            signaling = sig
-            val srv = HttpServer(assets, sig) {
-                ServerInfo(name = "LocalCast · ${Build.MODEL}", pinRequired = pinRequired, streaming = eng.isStreaming)
-            }
-            server = srv
-            val port = try {
-                withContext(Dispatchers.IO) { srv.start(settings.port) }
+            try {
+                startCasting(data)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "server start failed", e)
-                stopCast(getString(R.string.error_server_start, settings.port, settings.port + 9))
-                return@launch
+                Log.e(TAG, "start failed", e)
+                stopCast(getString(R.string.error_capture, e.message ?: e.javaClass.simpleName))
             }
-            if (stopping) return@launch // stop raced with start: teardown stops the server
-            val addresses = withContext(Dispatchers.IO) { NetAddresses.current() }
-            if (stopping) return@launch
-            CastStateStore.update {
-                it.copy(port = port, addresses = addresses, pin = pinGuard.pin, pinRequired = pinRequired)
-            }
-            updateNotification()
-            jobs += launch { observeSettings(eng) }
-            jobs += launch { pollAddresses() }
         }
+    }
+
+    /** Body of [startJob]: launches the long-running jobs in the job's scope. */
+    private suspend fun CoroutineScope.startCasting(data: Intent) {
+        val app = application as LocalCastApp
+        val settings = app.settings.current()
+        pinRequired = settings.requirePin
+        pauseOnLock = settings.pauseOnLock
+        acquireLocks()
+        registerScreenReceiver()
+
+        val eng = RtcEngine(this@CaptureService, engineListener)
+        engine = eng
+        eng.start(data, settings)
+
+        val sig = Signaling(pinGuard, eng, { pinRequired }, signalingListener)
+        signaling = sig
+        val srv = HttpServer(assets, sig) {
+            ServerInfo(name = "LocalCast · ${Build.MODEL}", pinRequired = pinRequired, streaming = eng.isStreaming)
+        }
+        server = srv
+        val port = try {
+            withContext(Dispatchers.IO) { srv.start(settings.port) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "server start failed", e)
+            stopCast(getString(R.string.error_server_start, settings.port, settings.port + 9))
+            return
+        }
+        if (stopping) return // stop raced with start: teardown stops the server
+        val addresses = withContext(Dispatchers.IO) { NetAddresses.current() }
+        if (stopping) return
+        CastStateStore.update {
+            it.copy(port = port, addresses = addresses, pin = pinGuard.pin, pinRequired = pinRequired)
+        }
+        updateNotification()
+        jobs += launch { observeSettings(eng) }
+        jobs += launch { pollAddresses() }
     }
 
     private suspend fun observeSettings(eng: RtcEngine) {
@@ -162,8 +176,14 @@ class CaptureService : LifecycleService() {
 
     /** Hotspot interfaces do not show up as ConnectivityManager networks, so poll interfaces. */
     private suspend fun pollAddresses() {
+        var wakeLockRenewedAt = SystemClock.elapsedRealtime()
         while (lifecycleScope.isActive) {
             delay(3_000)
+            // The wake lock has a timeout as a safety net; renew it so a long broadcast keeps it.
+            if (SystemClock.elapsedRealtime() - wakeLockRenewedAt > WAKE_LOCK_RENEW_MS) {
+                wakeLockRenewedAt = SystemClock.elapsedRealtime()
+                wakeLock?.takeIf { it.isHeld }?.acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
             val addresses = withContext(Dispatchers.IO) { NetAddresses.current() }
             if (addresses != CastStateStore.state.value.addresses) {
                 CastStateStore.update { it.copy(addresses = addresses) }
@@ -513,5 +533,6 @@ class CaptureService : LifecycleService() {
         const val CHANNEL_ID = "cast"
         const val NOTIFICATION_ID = 1
         const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
+        const val WAKE_LOCK_RENEW_MS = 60 * 60 * 1000L
     }
 }

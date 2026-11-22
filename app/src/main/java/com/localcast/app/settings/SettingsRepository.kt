@@ -1,5 +1,9 @@
 package com.localcast.app.settings
 
+import java.io.IOException
+import kotlinx.coroutines.flow.catch
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -43,7 +47,12 @@ data class StreamSettings(
     }
 }
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+// A corrupted file (e.g. power loss during a write) is replaced with defaults instead of crashing
+// every start of the app and of casting.
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 class SettingsRepository(private val context: Context) {
     private object Keys {
@@ -57,6 +66,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     val settings: Flow<StreamSettings> = context.dataStore.data
+        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { p ->
             val d = StreamSettings()
             StreamSettings(
