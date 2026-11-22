@@ -68,4 +68,10 @@ class HealthPolicyTest {
         assertEquals(HealthIssue.NONE, h.issue)
         assertEquals(1, h.viewers)
     }
+
+    @Test
+    fun viewerBelowFullQualityMeansNetwork() {
+        val v = viewer("1", 900.0).let { it.copy(sender = it.sender!!.copy(degraded = true)) }
+        assertEquals(HealthIssue.NETWORK, HealthPolicy.evaluate(load(viewers = 1), listOf(v)).issue)
+    }
 }

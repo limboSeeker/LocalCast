@@ -8,6 +8,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.withCharset
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
+import io.ktor.server.engine.EngineConnectorBuilder
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
@@ -43,10 +44,13 @@ class HttpServer(
     fun start(preferredPort: Int, attempts: Int = 10): Int = synchronized(lock) {
         check(engine == null) { "already started" }
         var last: Throwable? = null
+        // Viewers keep the address (and the QR they scanned): after a quick stop/start the old
+        // server may still be closing, so wait for the preferred port before moving on.
+        val first = waitForPort(preferredPort, PREFERRED_PORT_WAIT_MS, ::isPortFree)
         for (port in preferredPort until preferredPort + attempts) {
             // Ktor CIO binds asynchronously: a busy port surfaces as a BindException in a background
             // coroutine (which crashed the app) instead of from start(). Probe it first.
-            if (!isPortFree(port)) {
+            if (!(if (port == preferredPort) first else isPortFree(port))) {
                 last = BindException("port $port is busy")
                 continue
             }
@@ -66,13 +70,13 @@ class HttpServer(
     }
 
     /**
-     * Same address-reuse semantics as Ktor CIO (reuseAddress = false), so a port still in TIME_WAIT
-     * after a quick restart is reported busy here too instead of failing inside CIO.
-     * A port taken between this probe and the bind can still fail late (milliseconds window).
+     * Same address-reuse semantics as the CIO engine (reuseAddress = true): connections of the
+     * previous broadcast left in TIME_WAIT (up to a minute) do not block the port, a listening
+     * socket still does. A port taken between this probe and the bind can still fail late.
      */
     private fun isPortFree(port: Int): Boolean = try {
         java.net.ServerSocket().use {
-            it.reuseAddress = false
+            it.reuseAddress = true
             it.bind(java.net.InetSocketAddress(port))
         }
         true
@@ -89,7 +93,20 @@ class HttpServer(
         }
     }
 
-    private fun createEngine(port: Int) = embeddedServer(CIO, port = port, host = "0.0.0.0") {
+    private fun createEngine(port: Int) = embeddedServer(
+        CIO,
+        configure = {
+            connectors.add(
+                EngineConnectorBuilder().apply {
+                    this.port = port
+                    host = "0.0.0.0"
+                },
+            )
+            // Without it the port of a broadcast stopped seconds ago is busy (TIME_WAIT) and the
+            // server moved to the next port: the address and QR viewers had no longer worked.
+            reuseAddress = true
+        },
+    ) {
         install(WebSockets) {
             pingPeriod = 5.seconds
             timeout = 15.seconds
@@ -153,5 +170,24 @@ class HttpServer(
 
     private companion object {
         const val TAG = "LocalCast/Http"
+    }
+}
+
+internal const val PREFERRED_PORT_WAIT_MS = 3_000L
+internal const val PORT_POLL_MS = 200L
+
+/** True once [isFree] reports [port] free, polling for up to [waitMs]. */
+internal fun waitForPort(
+    port: Int,
+    waitMs: Long,
+    isFree: (Int) -> Boolean,
+    sleep: (Long) -> Unit = Thread::sleep,
+): Boolean {
+    var waited = 0L
+    while (true) {
+        if (isFree(port)) return true
+        if (waited >= waitMs) return false
+        sleep(PORT_POLL_MS)
+        waited += PORT_POLL_MS
     }
 }

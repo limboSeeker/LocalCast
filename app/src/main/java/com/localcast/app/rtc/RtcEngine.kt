@@ -123,11 +123,11 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     private var contentSize: CaptureSize? = null
     private var currentSize: CaptureSize? = null
 
-    /** Pixels of the capture (engine thread). */
-    internal val capturePixels: Int get() = currentSize?.pixels?.toInt() ?: 0
+    /** Current capture size (engine thread). */
+    internal val captureSize: CaptureSize? get() = currentSize
 
     /** A/B switches, read when a broadcast starts (debug builds: adb setprop, see [DebugKnobs]). */
-    @Volatile internal var fpsByBitrate = true
+    @Volatile internal var qualityLadder = true
     private var currentFps = 0
     private var statsTask: ScheduledFuture<*>? = null
     private var released = false
@@ -243,8 +243,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
         val egl = EglBase.create().also { eglBase = it }
         val guard = DebugKnobs.int("guard", 1) != 0
-        fpsByBitrate = DebugKnobs.int("fps_by_bitrate", 1) != 0
+        qualityLadder = DebugKnobs.int("ladder", 1) != 0
         TunedVideoEncoderFactory.minKeyFrameIntervalMs = DebugKnobs.int("key_interval_ms", 1000)
+        TunedVideoEncoderFactory.maxOperatingRate = DebugKnobs.int("enc_max_rate", 0) != 0
         val trials = fieldTrials(DebugKnobs.int("bwe_trials", DEFAULT_BWE_TRIALS))
         val encoders = TunedVideoEncoderFactory(egl.eglBaseContext, encoderListener, guard).also { encoderFactory = it }
         val probe = encoders.hardwareH264Name?.let(EncoderProbe::probe)

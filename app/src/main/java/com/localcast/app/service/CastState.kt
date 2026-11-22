@@ -106,6 +106,8 @@ data class SenderStats(
     val encodeMs: Double? = null,
     /** Average pacer/send queue delay per packet. */
     val sendDelayMs: Double? = null,
+    /** Sent below full quality (fewer frames or pixels) because the link is narrow. */
+    val degraded: Boolean = false,
 )
 
 data class ViewerInfo(

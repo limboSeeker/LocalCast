@@ -59,12 +59,17 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
   private static final AtomicInteger encoderSerial = new AtomicInteger();
 
   /**
-   * Keyframe requests (PLI after a loss) closer than this to the previous keyframe are encoded as
-   * delta frames. A keyframe of a screen is 10–30x a delta frame: on a lossy Wi-Fi link each one
-   * caused more loss and the next PLI (13 PLIs and 5 keyframes in 30 s of scrolling on a tablet).
-   * The browser repeats its request while it still needs a keyframe. 0 = no throttling.
+   * Minimum interval between keyframes of one encoder ({@link KeyFrameThrottle}): a request that
+   * comes sooner is served right after the interval. 0 = no throttling.
    */
   public static volatile int minKeyFrameIntervalMs = 1000;
+
+  /**
+   * Ask a lone hardware encoder to run at its maximum clock ({@code KEY_OPERATING_RATE =
+   * Short.MAX_VALUE}) instead of the frame rate: measured encode time on a Snapdragon 7s Gen 3 was
+   * 25–30 ms per frame at 60. A/B switch (debug knob {@code enc_max_rate}); see RtcEngine.
+   */
+  public static volatile boolean maxOperatingRate = false;
 
   public TunedVideoEncoderFactory(EglBase.Context sharedContext, @Nullable Listener listener) {
     this(sharedContext, listener, /* guardEnabled= */ true);
@@ -213,8 +218,7 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
 
     @Override
     public VideoCodecStatus initEncode(Settings settings, Callback callback) {
-      // A (re)initialised encoder starts with a keyframe of its own; let the next request through.
-      anyKeyFrame = false;
+      keyFrames.reset();
       // Count this encoder before the MediaCodec init: viewers that initialise in parallel then see
       // each other, so one failure (e.g. out of hardware slots) never disables H.264 for everyone.
       if (!live) {
@@ -241,26 +245,22 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
       return delegate.release();
     }
 
-    private long lastKeyFrameNs;
-    private boolean anyKeyFrame;
+    private final KeyFrameThrottle keyFrames = new KeyFrameThrottle();
 
     @Override
     public VideoCodecStatus encode(VideoFrame frame, EncodeInfo info) {
-      if (info != null && requestsKeyFrame(info)) {
-        long now = System.nanoTime();
-        long minNs = minKeyFrameIntervalMs * 1_000_000L;
-        if (anyKeyFrame && minNs > 0 && now - lastKeyFrameNs < minNs) {
-          info = DELTA_ONLY;
-        } else {
-          anyKeyFrame = true;
-          lastKeyFrameNs = now;
-        }
+      boolean requested = info != null && requestsKeyFrame(info);
+      boolean key = keyFrames.shouldEncodeKeyFrame(requested, System.nanoTime(), minKeyFrameIntervalMs);
+      if (requested != key) {
+        info = key ? KEY_ONLY : DELTA_ONLY;
       }
       return delegate.encode(frame, info);
     }
 
     private static final EncodeInfo DELTA_ONLY =
         new EncodeInfo(new EncodedImage.FrameType[] {EncodedImage.FrameType.VideoFrameDelta});
+    private static final EncodeInfo KEY_ONLY =
+        new EncodeInfo(new EncodedImage.FrameType[] {EncodedImage.FrameType.VideoFrameKey});
 
     private static boolean requestsKeyFrame(EncodeInfo info) {
       if (info.frameTypes == null) return false;
@@ -361,7 +361,9 @@ public class TunedVideoEncoderFactory implements VideoEncoderFactory {
       // With other sessions running, ask only for the real rate: over-provisioning one session can
       // eat the hardware budget the next viewer needs. (This encoder is already counted.)
       boolean othersRunning = liveHardwareEncoders.get() > 1;
-      f.setFloat(MediaFormat.KEY_OPERATING_RATE, othersRunning ? fps : Math.max(fps, 60f));
+      f.setFloat(
+          MediaFormat.KEY_OPERATING_RATE,
+          othersRunning ? fps : maxOperatingRate ? (float) Short.MAX_VALUE : Math.max(fps, 60f));
       f.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
       if (vendorAndLatency) {
         f.setInteger(MediaFormat.KEY_LATENCY, 1);

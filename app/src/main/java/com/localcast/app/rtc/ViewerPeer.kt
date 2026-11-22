@@ -50,12 +50,23 @@ internal class ViewerPeer(
     /** Stats showed this viewer on the hardware H.264 encoder (engine thread). */
     var hardwareConfirmed = false
 
-    /**
-     * Frame-rate cap from the encoder's current target ("sharpness first" only): a narrow link gets
-     * fewer, readable frames instead of blur. Null = the profile's frame rate (engine thread).
-     */
-    private var fpsCap: Int? = null
-    private var fpsRiseVotes = 0
+    /** Step on the [QualityLadder] chosen from the encoder's target: 0 = full quality (engine thread). */
+    private var ladder = QualityLadder.State()
+
+    /** Steps for this viewer, or null when it does not adapt (lite stream, switched off, no capture yet). */
+    private fun ladderRungs(): List<QualityLadder.Rung>? {
+        if (softwareEncoder || !engine.qualityLadder) return null
+        val size = engine.captureSize ?: return null
+        val p = engine.sendProfile
+        val sharp = p.degradation == RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+        return QualityLadder.rungs(size.width, size.height, p.fps, sharp)
+    }
+
+    private fun currentRung(): QualityLadder.Rung? =
+        ladderRungs()?.let { it.getOrNull(ladder.index.coerceIn(0, it.lastIndex)) }
+
+    /** Sent below full quality because of the link (engine thread). */
+    val degraded: Boolean get() = ladder.index > 0 && ladderRungs() != null
 
     /** ICE/DTLS connected (engine thread). */
     val isConnected: Boolean get() = connected
@@ -79,8 +90,7 @@ internal class ViewerPeer(
         remoteDescriptionSet = false
         hardwareConfirmed = false
         everConnected = false
-        fpsCap = null
-        fpsRiseVotes = 0
+        ladder = QualityLadder.State()
         pendingRemoteIce.clear()
 
         val peer = engine.factory.createPeerConnection(engine.rtcConfiguration(), Observer(gen))
@@ -128,11 +138,12 @@ internal class ViewerPeer(
             val maxBps = if (softwareEncoder) share.liteBps else share.fullBps
             // Software VP8 at full size would eat the CPU the capture pipeline needs.
             val profileFps = if (softwareEncoder) p.liteFps else p.fps
+            val rung = currentRung()
             params.encodings.forEach { e ->
                 e.maxBitrateBps = maxBps
                 e.minBitrateBps = CaptureFormat.MIN_BITRATE_BPS
-                e.maxFramerate = fpsCap?.coerceAtMost(profileFps) ?: profileFps
-                e.scaleResolutionDownBy = if (softwareEncoder) p.liteScale else 1.0
+                e.maxFramerate = rung?.fps?.coerceAtMost(profileFps) ?: profileFps
+                e.scaleResolutionDownBy = if (softwareEncoder) p.liteScale else rung?.scale ?: 1.0
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
             }
@@ -383,36 +394,33 @@ internal class ViewerPeer(
                 rttMs = rtt?.let { it * 1000.0 },
                 encodeMs = encodeMs,
                 sendDelayMs = sendDelayMs,
+                degraded = degraded,
             ),
         )
-        adaptFrameRate((m["targetBitrate"] as? Number)?.toInt())
+        adaptQuality((m["targetBitrate"] as? Number)?.toInt())
         // Last: this may turn the viewer away (closes the peer).
         engine.onPeerEncoder(this, codec, hardware)
     }
 
     /**
-     * Sharpness first: follows the encoder target with a frame-rate cap ([LoadPolicy.fpsForBitrate]).
-     * Lowers at once, raises after two polls in a row (4 s) so a probing spike doesn't flap it.
+     * Follows the encoder's target with the [QualityLadder]: down at once to the step that fits,
+     * back up one step after two good polls (4 s). Only this viewer's send parameters change.
      */
-    private fun adaptFrameRate(targetBps: Int?) {
-        val p = engine.sendProfile
-        if (!engine.fpsByBitrate || softwareEncoder || targetBps == null ||
-            p.degradation != RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
-        ) {
-            if (fpsCap != null) { fpsCap = null; applySendParameters() }
+    private fun adaptQuality(targetBps: Int?) {
+        val rungs = ladderRungs() ?: run {
+            if (ladder.index != 0) { ladder = QualityLadder.State(); applySendParameters() }
             return
         }
-        val wanted = LoadPolicy.fpsForBitrate(targetBps, engine.capturePixels, p.fps)
-        val current = fpsCap ?: p.fps
-        when {
-            wanted < current -> fpsRiseVotes = 0
-            wanted > current -> if (++fpsRiseVotes < 2) return
-            else -> { fpsRiseVotes = 0; return }
-        }
-        fpsRiseVotes = 0
-        val next = LoadPolicy.nextFpsCap(current, wanted)
-        fpsCap = next.takeIf { it < p.fps }
-        Log.i(DIAG_TAG, "$viewerId fps cap $current -> $next at target=${targetBps / 1000}kbps")
+        if (targetBps == null || targetBps <= 0) return
+        val size = engine.captureSize ?: return
+        val before = ladder.index.coerceIn(0, rungs.lastIndex)
+        ladder = QualityLadder.next(rungs, size.width, size.height, ladder, targetBps)
+        if (ladder.index == before) return
+        Log.i(
+            DIAG_TAG,
+            "$viewerId quality ${rungs[before].label(size.width, size.height)} -> " +
+                "${rungs[ladder.index].label(size.width, size.height)} at target=${targetBps / 1000}kbps",
+        )
         applySendParameters()
     }
 

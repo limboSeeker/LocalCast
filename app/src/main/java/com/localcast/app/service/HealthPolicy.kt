@@ -20,7 +20,9 @@ object HealthPolicy {
             val s = v.sender ?: return@any false
             s.qualityLimitation == "bandwidth" && (s.bitrateKbps ?: 0.0) < STARVED_SHARE * load.perViewerCapKbps
         }
-        val networkBusy = starved || (load.linkKbps > 0 && watching.size > 1 && totalKbps >= NETWORK_BUSY_SHARE * load.linkKbps)
+        // A viewer stepped down on the quality ladder: the link does not carry full quality.
+        val degraded = watching.any { it.sender?.degraded == true }
+        val networkBusy = starved || degraded || (load.linkKbps > 0 && watching.size > 1 && totalKbps >= NETWORK_BUSY_SHARE * load.linkKbps)
         val issue = when {
             load.turnedAway > 0 -> HealthIssue.AT_CAPACITY
             load.thermalLevel >= 2 -> HealthIssue.HOT
