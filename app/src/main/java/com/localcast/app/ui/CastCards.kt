@@ -408,13 +408,25 @@ private fun qrColors(dark: Color, light: Color): ColorFilter = ColorFilter.color
     ),
 )
 
-/** Address with tap-to-copy. */
+/** Copies a URL to the clipboard; below Android 13 (no system confirmation) also says so in [snackbar]. */
 @Composable
-fun AddressText(url: String, snackbar: SnackbarHostState, style: TextStyle, textAlign: TextAlign = TextAlign.Center, sidePadding: Dp = 8.dp) {
+fun rememberAddressCopier(snackbar: SnackbarHostState): (String) -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val copied = stringResource(R.string.ui_copied)
     val clipLabel = stringResource(R.string.app_name)
+    return { url ->
+        val cm = context.getSystemService(ClipboardManager::class.java)
+        cm.setPrimaryClip(ClipData.newPlainText(clipLabel, url))
+        // Android 13+ shows its own clipboard confirmation.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+    }
+}
+
+/** Address with tap-to-copy. */
+@Composable
+fun AddressText(url: String, snackbar: SnackbarHostState, style: TextStyle, textAlign: TextAlign = TextAlign.Center, sidePadding: Dp = 8.dp) {
+    val copy = rememberAddressCopier(snackbar)
     val shown = url.removePrefix("http://").removeSuffix("/")
     Text(
         shown,
@@ -424,12 +436,7 @@ fun AddressText(url: String, snackbar: SnackbarHostState, style: TextStyle, text
         modifier = Modifier
             .heightIn(min = 48.dp)
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClickLabel = stringResource(R.string.ui_copy_address)) {
-                val cm = context.getSystemService(ClipboardManager::class.java)
-                cm.setPrimaryClip(ClipData.newPlainText(clipLabel, url))
-                // Android 13+ shows its own clipboard confirmation.
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
-            }
+            .clickable(onClickLabel = stringResource(R.string.ui_copy_address)) { copy(url) }
             .padding(horizontal = sidePadding, vertical = 12.dp),
     )
 }
@@ -520,6 +527,7 @@ fun ConnectBlock(state: CastState, snackbar: SnackbarHostState, qrSide: Dp, onSh
         Spacer(Modifier.height(if (large) 8.dp else 4.dp))
         AddressText(url, snackbar, if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
         if (large) PinLine(state, centered = true, big = MaterialTheme.typography.headlineMedium) else PinLine(state, centered = true)
+        cableUrl(state.addresses, state.port)?.let { CableAddressRow(it, snackbar, centered = true) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.size(48.dp))
             ChipButton(stringResource(R.string.ui_show_viewers), painterResource(R.drawable.ic_fullscreen), onShow)
@@ -550,6 +558,7 @@ fun ConnectBlockWide(state: CastState, snackbar: SnackbarHostState, onShow: () -
                 )
                 AddressText(url, snackbar, MaterialTheme.typography.titleMedium, TextAlign.Start, sidePadding = 0.dp)
                 PinLine(state, centered = false)
+                cableUrl(state.addresses, state.port)?.let { CableAddressRow(it, snackbar, centered = false) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ChipButton(stringResource(R.string.ui_show_short), painterResource(R.drawable.ic_fullscreen), onShow)
                     ShareButton(url)

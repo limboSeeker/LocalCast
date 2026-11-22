@@ -218,4 +218,17 @@
     <string name="ui_set_language_current">English</string>
     <string name="ui_about_version" translatable="false">%1$s %2$s</string>
     <string name="ui_about_text">Casts the screen to a browser on the local network over WebRTC. No cloud, no sign-up.</string>
+    <!-- USB tethering (RNDIS): the laptop gets an Ethernet adapter to the tablet. -->
+    <string name="ui_cable_address">USB cable: %1$s</string>
+    <string name="ui_set_connection">Connection</string>
+    <string name="ui_cable_title">Casting over a USB cable</string>
+    <string name="ui_cable_hint">For a Windows laptop: steadier than Wi‑Fi</string>
+    <string name="ui_cable_show">Show steps</string>
+    <string name="ui_cable_hide">Hide steps</string>
+    <string name="ui_cable_step1">Connect the tablet to the laptop with a USB cable.</string>
+    <string name="ui_cable_step2">Turn on “USB tethering”.</string>
+    <string name="ui_cable_open_tether">Open tethering settings</string>
+    <string name="ui_cable_step3">In the laptop\'s browser, open the “USB cable” address from the live screen.</string>
+    <string name="ui_cable_fallback_note">If the cable is unplugged, viewing switches to Wi‑Fi by itself when the laptop is on the same network.</string>
+    <string name="ui_cable_data_warning">If the tablet isn\'t on Wi‑Fi, the laptop may use the tablet\'s mobile data for the internet.</string>
 </resources>

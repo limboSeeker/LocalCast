@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +39,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,12 +68,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -171,6 +177,9 @@ private fun MainPage(settings: StreamSettings, change: ((StreamSettings) -> Stre
         stringResource(R.string.ui_set_pause_lock_hint),
         settings.pauseOnLock,
     ) { v -> change { it.copy(pauseOnLock = v) } }
+
+    Section(stringResource(R.string.ui_set_connection))
+    CableHelpRow()
 
     Section(stringResource(R.string.ui_set_general))
     ThemeRow()
@@ -375,6 +384,93 @@ private fun openAppLanguageSettings(context: Context) {
     } catch (_: Exception) {
         // Some OEM builds lack the per-app language screen: fall back to the app's info page.
         openAppDetails(context)
+    }
+}
+
+/** "Casting over a USB cable": collapsed to one row; expands to three short steps and two notes. */
+@Composable
+private fun CableHelpRow() {
+    val context = LocalContext.current
+    var open by rememberSaveable { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = stringResource(if (open) R.string.ui_cable_hide else R.string.ui_cable_show),
+            ) { open = !open }
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        LabelBlock(stringResource(R.string.ui_cable_title), stringResource(R.string.ui_cable_hint), Modifier.weight(1f))
+        Icon(
+            if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (!open) return
+    Column(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CableStep(1, stringResource(R.string.ui_cable_step1))
+        CableStep(2, stringResource(R.string.ui_cable_step2)) {
+            OutlinedButton(onClick = { openTetherSettings(context) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.ui_cable_open_tether), style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        CableStep(3, stringResource(R.string.ui_cable_step3))
+        Text(
+            stringResource(R.string.ui_cable_fallback_note),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        NoticeBox(stringResource(R.string.ui_cable_data_warning), Tone.WARN)
+    }
+}
+
+@Composable
+private fun CableStep(n: Int, text: String, action: (@Composable () -> Unit)? = null) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                n.toString(),
+                style = MaterialTheme.typography.labelMedium.tabular(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // The step text is read on its own; the number adds nothing for TalkBack.
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        }
+        Column(Modifier.weight(1f).padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(text, style = MaterialTheme.typography.bodyMedium)
+            action?.invoke()
+        }
+    }
+}
+
+/** USB tethering screen; some builds hide or guard it, so fall back to network, then main settings. */
+private fun openTetherSettings(context: Context) {
+    val candidates = listOf(
+        Intent("android.settings.TETHER_SETTINGS"),
+        Intent(Settings.ACTION_WIRELESS_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS),
+    )
+    for (intent in candidates) {
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {
+            // ActivityNotFoundException or SecurityException (not exported): try the next one.
+        }
     }
 }
 

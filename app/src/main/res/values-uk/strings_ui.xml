@@ -206,4 +206,16 @@
     <string name="ui_live_battery_xiaomi">Також у налаштуваннях застосунку: «Автозапуск» і батарея «Без обмежень»</string>
     <string name="ui_set_language_current">Українська</string>
     <string name="ui_about_text">Трансляція екрана в браузер у локальній мережі через WebRTC. Без хмари й реєстрації.</string>
+    <string name="ui_cable_address">Кабель USB: %1$s</string>
+    <string name="ui_set_connection">Підключення</string>
+    <string name="ui_cable_title">Трансляція по кабелю</string>
+    <string name="ui_cable_hint">Для ноутбука з Windows: стабільніше за Wi‑Fi</string>
+    <string name="ui_cable_show">Показати кроки</string>
+    <string name="ui_cable_hide">Сховати кроки</string>
+    <string name="ui_cable_step1">З’єднайте планшет із ноутбуком USB-кабелем.</string>
+    <string name="ui_cable_step2">Увімкніть «USB-модем».</string>
+    <string name="ui_cable_open_tether">Відкрити налаштування модема</string>
+    <string name="ui_cable_step3">Відкрийте в браузері ноутбука адресу «Кабель USB» з екрана трансляції.</string>
+    <string name="ui_cable_fallback_note">Якщо кабель від’єднати, перегляд сам перейде на Wi‑Fi, коли ноутбук у тій самій мережі.</string>
+    <string name="ui_cable_data_warning">Якщо планшет не в Wi‑Fi, ноутбук може користуватися інтернетом через мобільні дані планшета.</string>
 </resources>
