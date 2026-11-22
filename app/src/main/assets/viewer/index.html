@@ -526,7 +526,7 @@ document.addEventListener('visibilitychange', function () {
   if (paused) return; // frames are sparse while paused
   var f0 = lastFrames;
   setTimeout(function () {
-    if (document.visibilityState !== 'visible' || !joined) return;
+    if (document.visibilityState !== 'visible' || !joined || paused) return;
     if (lastFrames === f0 && Date.now() - lastFrameT > 2000) recoverMedia();
   }, 1200);
 });

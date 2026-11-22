@@ -73,10 +73,9 @@ private fun CastState.healthOrFallback(): BroadcastHealth = health ?: BroadcastH
     hardwareEncoders = 0,
 )
 
-/** Priority: overheating > device limit > network > hot > warm > one slow viewer > all good. */
+/** Priority: overheating > device limit > network > hot > one slow viewer > all good. */
 @Composable
 private fun healthMessage(state: CastState, h: BroadcastHealth): HealthMessage {
-    val fps = state.capture?.fps
     return when {
         h.thermalLevel >= 3 -> HealthMessage(
             Severity.CRITICAL,
@@ -101,11 +100,8 @@ private fun healthMessage(state: CastState, h: BroadcastHealth): HealthMessage {
             stringResource(R.string.ui_health_hot_title),
             stringResource(R.string.ui_health_hot_body),
         )
-        h.thermalLevel == 1 -> HealthMessage(
-            Severity.WARN,
-            stringResource(R.string.ui_health_warm_title),
-            fps?.let { stringResource(R.string.ui_health_warm_body, it) },
-        )
+        // Warm (level 1) only lowers 60 -> 30 fps and is common on a tablet in use: shown in the
+        // heat metric, not as a warning (same as HealthPolicy).
         h.issue == HealthIssue.LATENCY -> {
             val worst = state.viewers.filter { it.connected }.maxByOrNull { it.viewer?.latencyMs ?: 0.0 }
             HealthMessage(
@@ -183,7 +179,8 @@ private fun heatWord(level: Int): String = stringResource(
     },
 )
 
-private fun BroadcastHealth.linkBusy(): Boolean = linkKbps > 0 && totalKbps >= HealthPolicy.NETWORK_BUSY_SHARE * linkKbps
+private fun BroadcastHealth.linkBusy(): Boolean =
+    viewers > 1 && linkKbps > 0 && totalKbps >= HealthPolicy.NETWORK_BUSY_SHARE * linkKbps
 
 @Composable
 private fun metrics(h: BroadcastHealth): List<Metric> {

@@ -186,6 +186,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                     if (peer.softwareEncoder) Log.i(DIAG_TAG, "$viewerId on lite VP8: ${loadLine()}")
                 }
             }
+            // Admitted now: a refusal of this address a moment ago no longer counts.
+            turnedAwayAt.remove(peer.remoteAddress)
             peers[viewerId] = peer
             rebalance()
             peer.negotiate()

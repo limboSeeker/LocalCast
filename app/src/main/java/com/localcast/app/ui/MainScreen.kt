@@ -32,6 +32,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,9 +90,20 @@ fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: 
         }
     }
 
+    // On air, the screen must not time out under the app (with the QR shown to viewers above all):
+    // a screen turning off pauses the broadcast (pause on lock).
+    val view = LocalView.current
+    DisposableEffect(view, s.onAir) {
+        view.keepScreenOn = s.onAir
+        onDispose { view.keepScreenOn = false }
+    }
+    val overlayOpen = (showViewers && s.onAir) || showSettings
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val twoPane = maxWidth >= 600.dp
         Scaffold(
+            // Full-screen overlays are drawn in this window: hide the screen below from TalkBack.
+            modifier = if (overlayOpen) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
                 when {
                     !s.onAir -> IdleTopBar(onOpenSettings)

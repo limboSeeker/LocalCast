@@ -338,8 +338,9 @@ class CaptureService : LifecycleService() {
                 s.copy(viewers = s.viewers.filterNot { it.id == viewerId } +
                     ViewerInfo(id = viewerId, remoteAddress = remoteIp, userAgent = userAgent, connected = false))
             }
-            // A viewer joining during a pause must show the "paused" card, not a black picture.
-            if (CastStateStore.state.value.isPaused) broadcastStreamState()
+            // `state` follows `welcome` for every viewer (docs/PROTOCOL.md); during a pause it shows
+            // the "paused" card instead of a black picture. Re-sending it to the others is harmless.
+            broadcastStreamState()
             lifecycleScope.launch { updateNotification() }
         }
 
