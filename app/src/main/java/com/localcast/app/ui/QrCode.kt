@@ -12,10 +12,10 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Black-on-white QR with a 4-module quiet zone. */
-fun encodeQr(text: String, sizePx: Int = 600): ImageBitmap {
+/** Black-on-white QR with a [margin]-module quiet zone. */
+fun encodeQr(text: String, sizePx: Int = 600, margin: Int = 4): ImageBitmap {
     val hints = mapOf(
-        EncodeHintType.MARGIN to 4,
+        EncodeHintType.MARGIN to margin,
         EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
         EncodeHintType.CHARACTER_SET to "UTF-8",
     )
@@ -35,7 +35,7 @@ fun encodeQr(text: String, sizePx: Int = 600): ImageBitmap {
 
 /** Encodes off the main thread; recomputed only when [text] changes. */
 @Composable
-fun rememberQrBitmap(text: String): State<ImageBitmap?> =
-    produceState<ImageBitmap?>(initialValue = null, key1 = text) {
-        value = withContext(Dispatchers.Default) { runCatching { encodeQr(text) }.getOrNull() }
+fun rememberQrBitmap(text: String, margin: Int = 4): State<ImageBitmap?> =
+    produceState<ImageBitmap?>(initialValue = null, key1 = text, key2 = margin) {
+        value = withContext(Dispatchers.Default) { runCatching { encodeQr(text, margin = margin) }.getOrNull() }
     }
