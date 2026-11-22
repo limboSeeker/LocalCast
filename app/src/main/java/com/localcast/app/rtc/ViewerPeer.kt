@@ -197,9 +197,11 @@ internal class ViewerPeer(
                 e.networkPriority = org.webrtc.Priority.HIGH
                 e.bitratePriority = 4.0
             }
-            if (!s.setParameters(params)) Log.w(TAG, "$viewerId: setParameters rejected")
+            val accepted = s.setParameters(params)
+            if (!accepted) Log.w(TAG, "$viewerId: setParameters rejected")
             peer.setBitrate(CaptureFormat.MIN_BITRATE_BPS, start, maxBps)
-            lastApplied = applied
+            // Only an accepted set is remembered: a rejected one is retried on the next call.
+            if (accepted) lastApplied = applied
         } catch (e: RuntimeException) {
             Log.w(TAG, "$viewerId: applySendParameters failed", e)
         }

@@ -107,14 +107,16 @@ object LogExport {
                 .redirectErrorStream(true)
                 .start()
             p = proc
-            watchdog.schedule({ proc.destroyForcibly() }, LOGCAT_TIMEOUT_S, TimeUnit.SECONDS)
+            val killed = java.util.concurrent.atomic.AtomicBoolean(false)
+            watchdog.schedule({ killed.set(true); proc.destroyForcibly() }, LOGCAT_TIMEOUT_S, TimeUnit.SECONDS)
             val (tail, dropped) = proc.inputStream.use { readTail(it, MAX_LOG_BYTES) }
             val note = when {
                 tail.isEmpty() -> "[logcat returned nothing]\n"
                 dropped > 0 -> "[older lines trimmed: $dropped bytes]\n"
                 else -> ""
             }
-            note.toByteArray() + tail
+            val end = if (killed.get()) "\n[logcat stopped after ${LOGCAT_TIMEOUT_S}s: the log may be incomplete]\n" else ""
+            note.toByteArray() + tail + end.toByteArray()
         } catch (e: Exception) {
             "[logcat failed: ${e.javaClass.simpleName}: ${e.message}]\n".toByteArray()
         } finally {

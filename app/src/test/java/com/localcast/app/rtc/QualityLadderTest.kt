@@ -91,4 +91,20 @@ class QualityLadderTest {
         // Full quality stays full quality.
         assertEquals(0, QualityLadder.remap(oldRungs, w, h, 0, newRungs, 720, 1152))
     }
+
+    @Test
+    fun aFailedRiseToFullQualityAlsoDoublesTheHoldAndASteadyRunForgetsIt() {
+        val one = State(index = 1, changedAtMs = 0)
+        val voted = next(one, 8_000, MIN_HOLD_MS)
+        val top = next(voted, 8_000, MIN_HOLD_MS + 2_000)
+        assertEquals(0, top.index)
+        // Still full quality a poll later: the "just rose" mark survives.
+        val stay = next(top, 8_000, MIN_HOLD_MS + 4_000)
+        val fell = next(stay, 3_000, MIN_HOLD_MS + 6_000)
+        assertEquals(1, fell.index)
+        assertEquals(2 * MIN_HOLD_MS, fell.holdMs)
+        // Long steady at full quality resets the hold for the next drop.
+        val steady = next(State(index = 0, changedAtMs = 0, holdMs = 4 * MIN_HOLD_MS), 8_000, 10 * MIN_HOLD_MS)
+        assertEquals(MIN_HOLD_MS, steady.holdMs)
+    }
 }

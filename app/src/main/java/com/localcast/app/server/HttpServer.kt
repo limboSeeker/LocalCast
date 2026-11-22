@@ -90,13 +90,17 @@ class HttpServer(
     }
 
     fun stop() {
-        val e = synchronized(lock) { engine.also { engine = null } } ?: return
+        val e = synchronized(lock) {
+            // Marked before stopping: a start racing with this stop already waits for the port.
+            if (engine != null) lastStop = boundPort to SystemClock.elapsedRealtime()
+            engine.also { engine = null }
+        } ?: return
         try {
             e.stop(gracePeriodMillis = 100, timeoutMillis = 500)
         } catch (t: Throwable) {
             Log.w(TAG, "stop failed", t)
         }
-        lastStop = boundPort to SystemClock.elapsedRealtime()
+        lastStop = lastStop.first to SystemClock.elapsedRealtime()
     }
 
     private fun createEngine(port: Int) = embeddedServer(

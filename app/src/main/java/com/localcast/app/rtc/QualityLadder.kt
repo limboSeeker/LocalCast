@@ -110,8 +110,13 @@ object QualityLadder {
             val hold = if (failedRise) min(state.holdMs * 2, MAX_HOLD_MS) else state.holdMs
             return State(fit, 0, nowMs, hold)
         }
-        if (current == 0) return state.copy(index = 0, riseVotes = 0)
-        if (nowMs - state.changedAtMs < state.holdMs) return state.copy(index = current, riseVotes = votesAfterRise(state))
+        val holding = nowMs - state.changedAtMs < state.holdMs
+        if (current == 0) {
+            // Keep the "just rose" mark through the hold (a fall then still counts as a failed
+            // rise); after a steady hold at full quality, forget past failures.
+            return if (holding) state.copy(index = 0) else state.copy(index = 0, riseVotes = 0, holdMs = MIN_HOLD_MS)
+        }
+        if (holding) return state.copy(index = current, riseVotes = votesAfterRise(state))
         val upper = needBps(rungs[current - 1], width, height)
         if (capLimited || targetBps >= upper * RISE_MARGIN) {
             val votes = max(0, state.riseVotes) + 1
