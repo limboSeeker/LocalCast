@@ -197,6 +197,13 @@
     <string name="ui_set_diagnostics">Скопіювати діагностику</string>
     <string name="ui_set_diagnostics_hint">Пристрій, кодери й показники потоку — для звіту про проблему</string>
     <string name="ui_set_diagnostics_done">Скопійовано в буфер обміну</string>
+    <string name="ui_set_share_log">Поділитися журналом</string>
+    <string name="ui_set_share_log_hint">Журнал застосунку файлом — щоб надіслати без кабелю</string>
+    <string name="ui_set_share_log_busy">Готую журнал…</string>
+    <string name="ui_set_share_log_failed">Не вдалося підготувати журнал</string>
+    <string name="ui_live_battery">Wi‑Fi може засинати, коли LocalCast не на екрані</string>
+    <string name="ui_live_battery_action">Вимкнути оптимізацію</string>
+    <string name="ui_live_battery_xiaomi">Також у налаштуваннях застосунку: «Автозапуск» і батарея «Без обмежень»</string>
     <string name="ui_set_language_current">Українська</string>
     <string name="ui_about_text">Трансляція екрана в браузер у локальній мережі через WebRTC. Без хмари й реєстрації.</string>
 </resources>

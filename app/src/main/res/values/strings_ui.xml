@@ -204,6 +204,13 @@
     <string name="ui_set_diagnostics">Copy diagnostics</string>
     <string name="ui_set_diagnostics_hint">Device, encoders and stream figures, for a bug report</string>
     <string name="ui_set_diagnostics_done">Copied to the clipboard</string>
+    <string name="ui_set_share_log">Share log</string>
+    <string name="ui_set_share_log_hint">App log as a file, to send without a cable</string>
+    <string name="ui_set_share_log_busy">Preparing the log…</string>
+    <string name="ui_set_share_log_failed">Couldn\'t prepare the log</string>
+    <string name="ui_live_battery">Wi‑Fi may sleep while LocalCast isn\'t on screen</string>
+    <string name="ui_live_battery_action">Turn off optimization</string>
+    <string name="ui_live_battery_xiaomi">Also in the app settings: Autostart and battery “No restrictions”</string>
     <!-- Bilingual on purpose: findable whichever language the app is in. Opens the system per-app
          language screen (Android 13+). -->
     <string name="ui_set_language" translatable="false">Мова / Language</string>

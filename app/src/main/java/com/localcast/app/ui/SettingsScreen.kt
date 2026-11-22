@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -36,7 +37,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -76,14 +80,18 @@ import com.localcast.app.BuildConfig
 import com.localcast.app.LocalCastApp
 import com.localcast.app.R
 import com.localcast.app.service.Diagnostics
+import com.localcast.app.service.LogExport
 import com.localcast.app.settings.FpsMode
 import com.localcast.app.settings.Priority
 import com.localcast.app.settings.ResolutionMode
 import com.localcast.app.settings.StreamSettings
 import com.localcast.app.ui.theme.brand
 import com.localcast.app.ui.theme.tabular
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 private enum class SettingsPage { MAIN, ADVANCED }
@@ -173,6 +181,7 @@ private fun MainPage(settings: StreamSettings, change: ((StreamSettings) -> Stre
     BatteryRow()
     if (isXiaomiFamily()) XiaomiHint()
     DiagnosticsRow()
+    ShareLogRow()
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp))
     AboutBlock()
@@ -369,14 +378,6 @@ private fun openAppLanguageSettings(context: Context) {
     }
 }
 
-private fun openAppDetails(context: Context) {
-    val app = Uri.fromParts("package", context.packageName, null)
-    try {
-        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, app))
-    } catch (_: Exception) {
-    }
-}
-
 @Composable
 private fun BatteryRow() {
     val context = LocalContext.current
@@ -399,12 +400,6 @@ private fun BatteryRow() {
             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.brand.good)
         }
     }
-}
-
-private fun isXiaomiFamily(): Boolean {
-    val m = Build.MANUFACTURER.lowercase()
-    val b = Build.BRAND.lowercase()
-    return listOf("xiaomi", "redmi", "poco").any { it == m || it == b }
 }
 
 /** HyperOS / MIUI kill background apps unless Autostart and "No restrictions" are allowed. */
@@ -458,6 +453,64 @@ private fun DiagnosticsRow() {
             tint = if (copied) MaterialTheme.brand.good else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(24.dp),
         )
+    }
+}
+
+private enum class LogStatus { IDLE, BUSY, FAILED }
+
+/** Builds diagnostics + this app's logcat into a file off the main thread and opens the share sheet. */
+@Composable
+private fun ShareLogRow() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf(LogStatus.IDLE) }
+    LaunchedEffect(status) {
+        if (status == LogStatus.FAILED) {
+            delay(4_000)
+            status = LogStatus.IDLE
+        }
+    }
+    val title = stringResource(R.string.ui_set_share_log)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(role = Role.Button, enabled = status != LogStatus.BUSY) {
+                status = LogStatus.BUSY
+                scope.launch {
+                    status = try {
+                        val file = withContext(Dispatchers.IO) { LogExport.build(context.applicationContext) }
+                        context.startActivity(LogExport.shareIntent(context, file, title))
+                        LogStatus.IDLE
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        LogStatus.FAILED
+                    }
+                }
+            }
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        LabelBlock(
+            title,
+            stringResource(
+                when (status) {
+                    LogStatus.IDLE -> R.string.ui_set_share_log_hint
+                    LogStatus.BUSY -> R.string.ui_set_share_log_busy
+                    LogStatus.FAILED -> R.string.ui_set_share_log_failed
+                },
+            ),
+            Modifier.weight(1f),
+        )
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            when (status) {
+                LogStatus.BUSY -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                LogStatus.FAILED -> Icon(painterResource(R.drawable.ic_error), contentDescription = null, tint = MaterialTheme.brand.liveDot)
+                LogStatus.IDLE -> Icon(Icons.Filled.Share, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
