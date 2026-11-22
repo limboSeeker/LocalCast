@@ -30,6 +30,10 @@ internal class ViewerPeer(
     override val viewerId: String,
     val remoteAddress: String,
     private val engine: RtcEngine,
+    /** Our IP the viewer's WebSocket arrived on, or null. */
+    val localAddress: String? = null,
+    /** That IP is the USB tether: video stays on the cable and is not part of the Wi-Fi split. */
+    val viaUsb: Boolean = false,
     private val send: (ServerMessage) -> Unit,
 ) : ViewerSession {
 
@@ -150,6 +154,16 @@ internal class ViewerPeer(
      * Bitrate, frame rate, size and degradation preference from the current capture settings and
      * this viewer's share of the Wi-Fi. Called again whenever viewers join or leave.
      */
+    /** This viewer's bitrate cap: its share of the Wi-Fi, or the whole profile over the cable. */
+    private fun capBps(): Int {
+        val share = engine.shares
+        return when {
+            softwareEncoder -> share.liteBps
+            viaUsb -> engine.sendProfile.maxBitrateBps
+            else -> share.fullBps
+        }
+    }
+
     private data class Applied(
         val generation: Int,
         val negotiated: Boolean,
@@ -169,7 +183,7 @@ internal class ViewerPeer(
         try {
             val params = s.parameters
             params.degradationPreference = p.degradation
-            val maxBps = if (softwareEncoder) share.liteBps else share.fullBps
+            val maxBps = capBps()
             // Software VP8 at full size would eat the CPU the capture pipeline needs.
             val profileFps = if (softwareEncoder) p.liteFps else p.fps
             val rung = currentRung()
@@ -472,7 +486,7 @@ internal class ViewerPeer(
         val share = engine.shares
         val before = ladder.index.coerceIn(0, rungs.lastIndex)
         ladder = QualityLadder.next(
-            rungs, size.width, size.height, ladder, targetBps, share.fullBps, SystemClock.elapsedRealtime(),
+            rungs, size.width, size.height, ladder, targetBps, capBps(), SystemClock.elapsedRealtime(),
             QualityLadder.bitsPerPixel(lastCodec),
         )
         if (ladder.index == before) return
@@ -505,6 +519,7 @@ internal class ViewerPeer(
         override fun onIceCandidate(candidate: IceCandidate) {
             engine.post {
                 if (gen != generation || closed) return@post
+                if (!IcePath.shouldSend(candidate.sdp, viaUsb, localAddress)) return@post
                 send(ServerMessage.Ice(IceCandidateDto(candidate.sdp, candidate.sdpMid, candidate.sdpMLineIndex)))
             }
         }

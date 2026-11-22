@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import android.view.WindowManager
+import com.localcast.app.server.NetAddresses
 import com.localcast.app.server.ServerMessage
 import com.localcast.app.server.ViewerStats
 import com.localcast.app.service.CaptureInfo
@@ -199,7 +200,9 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
         send: (ServerMessage) -> Unit,
     ): ViewerSession? {
         if (!isStreaming) return null
-        val peer = ViewerPeer(viewerId, remoteAddress, this, send)
+        val viaUsb = IcePath.isUsb(localAddress, NetAddresses.current())
+        val peer = ViewerPeer(viewerId, remoteAddress, this, localAddress, viaUsb, send)
+        if (viaUsb) Log.i(DIAG_TAG, "$viewerId on the USB cable ($localAddress)")
         post {
             if (!isStreaming) {
                 peer.closeNow()
@@ -420,13 +423,15 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
     /** Re-splits the Wi-Fi between the viewers and applies the caps to every sender. */
     private fun rebalance() {
-        val lite = peers.values.count { it.softwareEncoder }
+        // Viewers on the USB cable don't share the Wi-Fi.
+        val overWifi = peers.values.filter { !it.viaUsb }
+        val lite = overWifi.count { it.softwareEncoder }
         wifiMhz = WifiBand.currentMhz(appContext)
         val link = LoadPolicy.linkBudgetBps(wifiMhz)
         linkBps = link
-        val next = LoadPolicy.shares(sendProfile.maxBitrateBps, link, peers.size - lite, lite)
+        val next = LoadPolicy.shares(sendProfile.maxBitrateBps, link, overWifi.size - lite, lite)
         if (next != shares) {
-            Log.i(DIAG_TAG, "bitrate split: ${peers.size} viewers ($lite lite), link ${link / 1_000_000} Mbps -> " +
+            Log.i(DIAG_TAG, "bitrate split: ${overWifi.size} Wi-Fi viewers ($lite lite), link ${link / 1_000_000} Mbps -> " +
                 "${next.fullBps / 1000} / ${next.liteBps / 1000} kbps")
         }
         shares = next
@@ -541,6 +546,19 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
      * H.264 first (when the hardware encoder is usable), VP8 fallback, plus RTX for retransmissions.
      * [preferSoftware]: VP8 first for a viewer beyond the hardware session budget.
      */
+    /**
+     * The device's local addresses changed (a cable plugged or pulled, Wi-Fi switched): viewers
+     * whose WebSocket came over an address that is gone are closed now; their pages reconnect
+     * over another path instead of waiting for connection timeouts.
+     */
+    fun onLocalAddressesChanged(ips: Set<String>) = post {
+        val gone = peers.values.filter { it.localAddress != null && it.localAddress !in ips }
+        gone.forEach {
+            Log.i(DIAG_TAG, "${it.viewerId}: path ${it.localAddress} is gone, closing")
+            it.closeNow()
+        }
+    }
+
     internal fun applyCodecPreferences(transceiver: RtpTransceiver, preferSoftware: Boolean) {
         val codecs = factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs
         // H.265 first where the hardware has it: browsers that decode it (Chrome/Edge 136+ with a

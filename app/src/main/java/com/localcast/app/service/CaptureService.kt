@@ -30,6 +30,7 @@ import com.localcast.app.R
 import com.localcast.app.rtc.RtcEngine
 import com.localcast.app.server.HttpServer
 import com.localcast.app.server.NetAddresses
+import com.localcast.app.server.toDtos
 import com.localcast.app.server.PinGuard
 import com.localcast.app.server.ServerInfo
 import com.localcast.app.server.ServerMessage
@@ -64,6 +65,9 @@ class CaptureService : LifecycleService() {
     private val jobs = mutableListOf<Job>()
     private var startJob: Job? = null
     @Volatile private var pinRequired = true
+
+    /** Port the HTTP server listens on (null until started): sent with the address list. */
+    @Volatile private var boundPort: Int? = null
     @Volatile private var pauseOnLock = true
     private var screenReceiverRegistered = false
     private var stopping = false
@@ -132,10 +136,20 @@ class CaptureService : LifecycleService() {
         engine = eng
         eng.start(data, settings)
 
-        val sig = Signaling(pinGuard, eng, { pinRequired }, signalingListener)
+        // Every local path to this device (USB cable, Wi-Fi, hotspot...): viewer pages move to the
+        // best one that answers and fall back when it goes away.
+        val sig = Signaling(pinGuard, eng, { pinRequired }, signalingListener, addresses = {
+            CastStateStore.state.value.addresses.toDtos() to boundPort
+        })
         signaling = sig
         val srv = HttpServer(assets, sig) {
-            ServerInfo(name = "LocalCast · ${Build.MODEL}", pinRequired = pinRequired, streaming = eng.isStreaming)
+            ServerInfo(
+                name = "LocalCast · ${Build.MODEL}",
+                pinRequired = pinRequired,
+                streaming = eng.isStreaming,
+                addresses = CastStateStore.state.value.addresses.toDtos(),
+                port = boundPort,
+            )
         }
         server = srv
         val port = try {
@@ -148,6 +162,7 @@ class CaptureService : LifecycleService() {
             return
         }
         if (stopping) return // stop raced with start: teardown stops the server
+        boundPort = port
         val addresses = withContext(Dispatchers.IO) { NetAddresses.current() }
         if (stopping) return
         CastStateStore.update {
@@ -188,6 +203,10 @@ class CaptureService : LifecycleService() {
             if (addresses != CastStateStore.state.value.addresses) {
                 CastStateStore.update { it.copy(addresses = addresses) }
                 updateNotification()
+                // A cable plugged in or pulled out: pages switch paths, viewers on a vanished
+                // interface are closed at once instead of waiting for timeouts.
+                signaling?.broadcastAddresses()
+                engine?.onLocalAddressesChanged(addresses.map { it.ip }.toSet())
             }
         }
     }
