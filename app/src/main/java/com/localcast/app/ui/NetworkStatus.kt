@@ -114,12 +114,15 @@ private fun resolve(default: DefaultNet, addresses: List<NetAddress>): NetworkKi
     }
 }
 
-private fun band(mhz: Int?): NetworkKind = when (mhz) {
-    null -> NetworkKind.WIFI
+private fun band(mhz: Int?): NetworkKind = wifiBand(mhz) ?: NetworkKind.WIFI
+
+/** [NetworkKind.WIFI_24] / [NetworkKind.WIFI_5] / [NetworkKind.WIFI_6] for a Wi-Fi frequency; null when unknown. */
+internal fun wifiBand(mhz: Int?): NetworkKind? = when (mhz) {
+    null -> null
     in 2400..2500 -> NetworkKind.WIFI_24
     in 4900..5900 -> NetworkKind.WIFI_5
     in 5925..7125 -> NetworkKind.WIFI_6
-    else -> NetworkKind.WIFI
+    else -> null
 }
 
 private fun classify(context: Context, caps: NetworkCapabilities): DefaultNet = when {

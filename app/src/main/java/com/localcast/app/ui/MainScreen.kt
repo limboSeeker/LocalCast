@@ -100,15 +100,30 @@ fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: 
     val overlayOpen = (showViewers && s.onAir) || showSettings
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val twoPane = maxWidth >= 600.dp
+        // Two panes only on a wide landscape window (landscape tablet, landscape phone, split screen):
+        // there the height is short and the width is spare. A portrait tablet stacks one centred
+        // column instead, which leaves room for a large QR and the viewer list.
+        val twoPane = maxWidth >= 600.dp && maxWidth > maxHeight
+        val wide = maxWidth >= 600.dp
         Scaffold(
             // Full-screen overlays are drawn in this window: hide the screen below from TalkBack.
             modifier = if (overlayOpen) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
                 when {
                     !s.onAir -> IdleTopBar(onOpenSettings)
-                    !twoPane -> Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-                        LiveTopRow(state, s.liveSince, onOpenSettings)
+                    !twoPane -> Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        LiveTopRow(
+                            state,
+                            s.liveSince,
+                            onOpenSettings,
+                            Modifier.widthIn(max = COLUMN_MAX),
+                            timerStyle = if (wide) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineSmall,
+                        )
                     }
                 }
             },
@@ -116,10 +131,13 @@ fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: 
                 if (s.onAir && !twoPane) {
                     Box(
                         Modifier
+                            .fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                             .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        if (state.isPaused) PausedButtons(state, onStop) else LiveButtons(state, onStop)
+                        val width = Modifier.widthIn(max = COLUMN_MAX - 40.dp)
+                        if (state.isPaused) PausedButtons(state, onStop, width) else LiveButtons(state, onStop, width)
                     }
                 }
             },
@@ -129,7 +147,7 @@ fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: 
             when {
                 !s.onAir -> IdleBody(padding, s, actions)
                 twoPane -> LiveTwoPane(padding, s, snackbarHostState, actions)
-                else -> LiveOnePane(padding, s, snackbarHostState, actions)
+                else -> LiveOnePane(padding, s, snackbarHostState, actions, wide)
             }
         }
     }
@@ -138,6 +156,9 @@ fun MainScreen(snackbarHostState: SnackbarHostState, appDark: Boolean, onStart: 
     if (showViewers && s.onAir) ShowToViewers(state, s.liveSince, appDark, onClose = { showViewers = false })
     if (showSettings) SettingsScreen(onClose = { showSettings = false })
 }
+
+/** Widest the one-column layout grows (portrait tablet), edge paddings included. */
+private val COLUMN_MAX = 640.dp
 
 /** Everything the panes render, gathered once per recomposition. */
 private class ScreenState(
@@ -203,7 +224,7 @@ private fun IdleBody(padding: PaddingValues, s: ScreenState, a: Actions) {
 }
 
 @Composable
-private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: SnackbarHostState, a: Actions) {
+private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: SnackbarHostState, a: Actions, wide: Boolean) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
         if (s.cast.isPaused) {
             Column(
@@ -219,6 +240,10 @@ private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: Snackb
             }
             return@BoxWithConstraints
         }
+        if (wide) {
+            LiveWideColumn(s, snackbar, a, maxWidth, maxHeight)
+            return@BoxWithConstraints
+        }
         // A short window (landscape phone, split screen) keeps the QR smaller rather than scrolling it away.
         val qrSide: Dp = (maxHeight - 300.dp).coerceIn(140.dp, 176.dp)
         Column(
@@ -232,6 +257,43 @@ private fun LiveOnePane(padding: PaddingValues, s: ScreenState, snackbar: Snackb
             ConnectBlock(s.cast, snackbar, qrSide, a.show)
             Spacer(Modifier.height(8.dp))
             HealthCard(s.cast, a.health)
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * Portrait tablet: one centred column. The QR grows with the width (scanned from across a table)
+ * as long as the status card and the first viewers still fit below it.
+ */
+@Composable
+private fun LiveWideColumn(s: ScreenState, snackbar: SnackbarHostState, a: Actions, maxWidth: Dp, maxHeight: Dp) {
+    val state = s.cast
+    val captureFps = state.capture?.fps
+    val content = minOf(maxWidth, COLUMN_MAX) - 40.dp
+    val qrSide = (content * 0.66f).coerceAtMost(400.dp).coerceAtMost(maxHeight - 440.dp).coerceAtLeast(176.dp)
+    val groups = groupByDevice(state.viewers, captureFps)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .heightIn(min = maxHeight)
+            .padding(horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        // Centred while it fits; the viewer list scrolls the column once it grows.
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Column(Modifier.widthIn(max = content).fillMaxWidth()) {
+            Spacer(Modifier.height(16.dp))
+            ConnectBlock(state, snackbar, qrSide, a.show, large = true)
+            Spacer(Modifier.height(16.dp))
+            HealthCard(state, a.health, maxViewers = 0)
+            // With no one connected the status card already says so.
+            if (groups.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                SectionLabel(viewersSection(state.viewers, groups), Modifier.padding(bottom = 8.dp))
+                ViewerList(groups, captureFps)
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -273,9 +335,13 @@ private fun LiveTwoPane(padding: PaddingValues, s: ScreenState, snackbar: Snackb
                 .padding(horizontal = 24.dp, vertical = 24.dp),
         ) {
             ConnectBlockWide(state, snackbar, a.show)
-            Spacer(Modifier.height(24.dp))
-            SectionLabel(stringResource(R.string.ui_viewers_section, state.viewers.size), Modifier.padding(bottom = 8.dp))
-            ViewerList(sortWorstFirst(state.viewers, state.capture?.fps), state.capture?.fps)
+            val groups = groupByDevice(state.viewers, state.capture?.fps)
+            // With no one connected the status card on the left already says so.
+            if (groups.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                SectionLabel(viewersSection(state.viewers, groups), Modifier.padding(bottom = 8.dp))
+                ViewerList(groups, state.capture?.fps)
+            }
         }
     }
 }

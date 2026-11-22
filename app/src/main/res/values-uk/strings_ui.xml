@@ -15,6 +15,7 @@
     <string name="ui_net_hotspot">Точка доступу</string>
     <string name="ui_net_other">Локальна мережа</string>
     <string name="ui_net_none">Немає мережі</string>
+    <string name="ui_net_unknown">Точка доступу або невідомо</string>
     <string name="ui_net_cd">Мережа: %1$s</string>
     <string name="ui_net_24_hint">Wi-Fi 2,4 ГГц часто нестабільний. Для плавної картинки краще 5 ГГц або точка доступу цього пристрою</string>
     <string name="ui_preset_chip">Якість: %1$s</string>
@@ -69,6 +70,7 @@
     <string name="ui_health_ok">Усе гаразд</string>
     <string name="ui_health_network_title">Мережа не встигає</string>
     <string name="ui_health_network_body">Якість знижено до %1$s</string>
+    <string name="ui_health_network_24">Мережа 2,4 ГГц: перейдіть на 5 ГГц</string>
     <string name="ui_health_hot_title">Пристрій гарячий</string>
     <string name="ui_health_hot_body">Якість знижено. Зніміть чохол або від’єднайте зарядку</string>
     <string name="ui_health_critical_title">Перегрів</string>
@@ -113,6 +115,25 @@
 
     <!-- Viewers -->
     <string name="ui_viewers_section">Глядачі · %1$d</string>
+    <string name="ui_viewers_section_devices">Глядачі · %1$s, %2$s</string>
+    <plurals name="ui_devices_count">
+        <item quantity="one">%d пристрій</item>
+        <item quantity="few">%d пристрої</item>
+        <item quantity="many">%d пристроїв</item>
+        <item quantity="other">%d пристрою</item>
+    </plurals>
+    <plurals name="ui_streams_count">
+        <item quantity="one">%d потік</item>
+        <item quantity="few">%d потоки</item>
+        <item quantity="many">%d потоків</item>
+        <item quantity="other">%d потоку</item>
+    </plurals>
+    <plurals name="ui_viewer_tabs">
+        <item quantity="one">%d вкладка</item>
+        <item quantity="few">%d вкладки</item>
+        <item quantity="many">%d вкладок</item>
+        <item quantity="other">%d вкладки</item>
+    </plurals>
     <string name="ui_viewers_empty">Поки що ніхто не під’єднався</string>
     <string name="ui_viewer_ok">добре</string>
     <string name="ui_viewer_unstable">нестабільно</string>

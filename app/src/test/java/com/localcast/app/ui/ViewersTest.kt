@@ -63,6 +63,78 @@ class ViewersTest {
         assertEquals(listOf("poor", "slow", "ok"), sorted)
     }
 
+    private val pixelChrome = "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36"
+    private val pixelFirefox = "Mozilla/5.0 (Android 15; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+    private val mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+
+    private fun stream(id: String, address: String, ua: String?, fps: Double = 60.0, latency: Double = 40.0) = ViewerInfo(
+        id = id, remoteAddress = address, userAgent = ua, connected = true,
+        sender = SenderStats(fps = 60.0), viewer = ViewerStats(fps = fps, latencyMs = latency),
+    )
+
+    @Test
+    fun groupsTabsOfOneDevice() {
+        val groups = groupByDevice(
+            listOf(
+                stream("a1", "10.0.0.5", pixelChrome),
+                stream("mac", "10.0.0.7", mac),
+                stream("a2", "10.0.0.5", pixelChrome, fps = 20.0),
+                stream("a3", "10.0.0.5", pixelChrome, latency = 200.0),
+            ),
+            60,
+        )
+        assertEquals(2, groups.size)
+        // The device with the poor tab comes first; its worst tab leads, then the slow one.
+        assertEquals(listOf("a2", "a3", "a1"), groups[0].members.map { it.id })
+        assertEquals("a2", groups[0].lead.id)
+        assertEquals(3, groups[0].streams)
+        assertEquals(listOf("mac"), groups[1].members.map { it.id })
+    }
+
+    @Test
+    fun differentDevicesStaySeparate() {
+        // Same address but a different device in the user agent, and same device on another address.
+        val groups = groupByDevice(
+            listOf(
+                stream("1", "10.0.0.5", pixelChrome),
+                stream("2", "10.0.0.5", mac),
+                stream("3", "10.0.0.6", pixelChrome),
+            ),
+            60,
+        )
+        assertEquals(3, groups.size)
+        assertEquals(listOf(1, 1, 1), groups.map { it.streams })
+    }
+
+    @Test
+    fun browsersOfOneDeviceShareAGroup() {
+        // Firefox on Android does not name the model: "Android" vs "Pixel 9" are different devices.
+        assertEquals("Android", deviceFromUserAgent(pixelFirefox))
+        val groups = groupByDevice(
+            listOf(
+                stream("1", "10.0.0.5", pixelChrome),
+                stream("2", "10.0.0.5", pixelChrome.replace("Chrome/131.0 ", "Chrome/131.0 SamsungBrowser/26.0 ")),
+                stream("3", "10.0.0.8", null),
+                stream("4", "10.0.0.8", null),
+            ),
+            60,
+        )
+        assertEquals(listOf(2, 2), groups.map { it.streams })
+        assertEquals(emptyList<ViewerGroup>(), groupByDevice(emptyList(), 60))
+    }
+
+    @Test
+    fun wifiBands() {
+        assertEquals(NetworkKind.WIFI_24, wifiBand(2412))
+        assertEquals(NetworkKind.WIFI_24, wifiBand(2484))
+        assertEquals(NetworkKind.WIFI_5, wifiBand(5180))
+        assertEquals(NetworkKind.WIFI_5, wifiBand(5825))
+        assertEquals(NetworkKind.WIFI_6, wifiBand(5955))
+        assertEquals(NetworkKind.WIFI_6, wifiBand(7115))
+        assertNull(wifiBand(null))
+        assertNull(wifiBand(60_480))
+    }
+
     @Test
     fun durations() {
         assertEquals("00:07", formatDuration(7_400))

@@ -17,6 +17,7 @@
     <string name="ui_net_ethernet" translatable="false">Ethernet</string>
     <string name="ui_net_other">Local network</string>
     <string name="ui_net_none">No network</string>
+    <string name="ui_net_unknown">Hotspot or unknown</string>
     <string name="ui_net_cd">Network: %1$s</string>
     <string name="ui_net_24_hint">2.4 GHz Wi-Fi is often unstable. For a smooth picture, use 5 GHz or this device’s hotspot</string>
     <string name="ui_preset_chip">Quality: %1$s</string>
@@ -74,6 +75,7 @@
     <string name="ui_health_ok">All good</string>
     <string name="ui_health_network_title">Network can’t keep up</string>
     <string name="ui_health_network_body">Quality lowered to %1$s</string>
+    <string name="ui_health_network_24">2.4 GHz Wi-Fi: switch to 5 GHz</string>
     <string name="ui_health_hot_title">Device is hot</string>
     <string name="ui_health_hot_body">Quality lowered. Remove the case or unplug the charger</string>
     <string name="ui_health_critical_title">Overheating</string>
@@ -114,6 +116,19 @@
 
     <!-- Viewers -->
     <string name="ui_viewers_section">Viewers · %1$d</string>
+    <string name="ui_viewers_section_devices">Viewers · %1$s, %2$s</string>
+    <plurals name="ui_devices_count">
+        <item quantity="one">%d device</item>
+        <item quantity="other">%d devices</item>
+    </plurals>
+    <plurals name="ui_streams_count">
+        <item quantity="one">%d stream</item>
+        <item quantity="other">%d streams</item>
+    </plurals>
+    <plurals name="ui_viewer_tabs">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
     <string name="ui_viewers_empty">No one has connected yet</string>
     <string name="ui_viewer_name" translatable="false">%1$s · %2$s</string>
     <string name="ui_viewer_ok">good</string>
