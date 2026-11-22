@@ -36,6 +36,8 @@ import kotlinx.coroutines.withContext
 class HttpServer(
     private val assets: AssetManager,
     private val signaling: Signaling,
+    /** This device's own IPv4 addresses: a page loaded from one of them may open `/ws` on another (multipath). */
+    private val ownIps: () -> Collection<String> = { NetAddresses.current().map { it.ip } },
     private val info: () -> ServerInfo,
 ) {
     private val lock = Any()
@@ -136,22 +138,17 @@ class HttpServer(
             webSocket("/ws") {
                 // Browsers always send Origin for WebSocket handshakes. Reject other sites' pages
                 // (cross-site WebSocket hijacking); non-browser clients without Origin are allowed.
+                // A page served from another of this device's addresses (Wi-Fi page, USB socket) is ours too.
                 val origin = call.request.headers[HttpHeaders.Origin]
                 val host = call.request.headers[HttpHeaders.Host]
-                if (origin != null && !sameOrigin(origin, host)) {
+                if (origin != null && !originAllowed(origin, host) { runCatching { ownIps() }.getOrDefault(emptyList()) }) {
                     Log.w(TAG, "rejected WebSocket from foreign origin $origin (host $host)")
                     close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "origin"))
                     return@webSocket
                 }
-                signaling.handle(this, call.request.origin.remoteAddress)
+                signaling.handle(this, call.request.origin.remoteAddress, plainIp(call.request.local.localAddress))
             }
         }
-    }
-
-    private fun sameOrigin(origin: String, host: String?): Boolean {
-        if (host == null) return false
-        val authority = runCatching { URI(origin).rawAuthority }.getOrNull() ?: return false
-        return authority.equals(host, ignoreCase = true)
     }
 
     private suspend fun io.ktor.server.routing.RoutingContext.respondIndex() {
@@ -184,6 +181,34 @@ class HttpServer(
 }
 
 internal const val PREFERRED_PORT_WAIT_MS = 3_000L
+
+/**
+ * Origin rule for `/ws` (cross-site WebSocket hijacking protection). Allowed: the same origin as [host] (the `Host`
+ * header), or an `http` origin whose host is one of this device's own IPv4 addresses ([ownIps], resolved
+ * on demand) on the same port as [host] — a page loaded from the Wi-Fi address may open the socket on the USB address
+ * and vice versa. Everything else (other sites, other ports, names, https) is rejected.
+ */
+internal fun originAllowed(origin: String, host: String?, ownIps: () -> Collection<String>): Boolean {
+    if (host == null) return false
+    val o = runCatching { URI(origin) }.getOrNull() ?: return false
+    val authority = o.rawAuthority ?: return false
+    if (authority.equals(host, ignoreCase = true)) return true
+    if (!o.scheme.equals("http", ignoreCase = true)) return false
+    val originHost = o.host ?: return false
+    val hostPort = runCatching { URI("http://$host").port }.getOrNull() ?: return false
+    val originPort = if (o.port == -1) 80 else o.port
+    if (originPort != (if (hostPort == -1) 80 else hostPort)) return false
+    return originHost in ownIps()
+}
+
+/** Socket address as a plain IP: IPv6-mapped IPv4 (`::ffff:a.b.c.d`) unwrapped, brackets/zone dropped; null if unknown. */
+internal fun plainIp(address: String?): String? {
+    var a = address?.trim()?.removePrefix("/") ?: return null
+    if (a.startsWith("[") && a.endsWith("]")) a = a.substring(1, a.length - 1)
+    a = a.substringBefore('%')
+    if (a.startsWith("::ffff:", ignoreCase = true) && a.count { it == '.' } == 3) a = a.substring(7)
+    return a.takeIf { it.isNotEmpty() && !it.equals("localhost", ignoreCase = true) }
+}
 
 /** Port and time (elapsedRealtime) at which the last server of this process stopped. */
 @Volatile private var lastStop: Pair<Int, Long> = 0 to Long.MIN_VALUE / 2

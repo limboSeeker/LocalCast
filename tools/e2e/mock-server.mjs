@@ -16,7 +16,7 @@ class Sock {
   constructor(socket) {
     this.socket = socket; this.buf = Buffer.alloc(0); this.frag = []; this.closed = false;
     this.onmessage = () => {}; this.onclose = () => {};
-    socket.on('data', (d) => { this.buf = Buffer.concat([this.buf, d]); this.parse(); });
+    socket.on('data', (d) => { if (this.muted) return; this.buf = Buffer.concat([this.buf, d]); this.parse(); });
     socket.on('close', () => this.fin());
     socket.on('error', () => this.fin());
   }
@@ -44,7 +44,7 @@ class Sock {
     }
   }
   frame(op, payload) {
-    if (this.closed) return;
+    if (this.closed || this.muted) return;
     const n = payload.length;
     const h = n < 126 ? Buffer.from([0x80 | op, n]) : n < 65536 ? Buffer.from([0x80 | op, 126, n >> 8, n & 255])
       : (() => { const x = Buffer.alloc(10); x[0] = 0x80 | op; x[1] = 127; x.writeBigUInt64BE(BigInt(n), 2); return x; })();
@@ -55,11 +55,21 @@ class Sock {
   kill() { this.socket.destroy(); }
 }
 
+// Multipath: the main listener is the "wifi" address of the device; POST /mock/usb starts a second listener (another
+// port on 127.0.0.1) serving the same app and lists it as the "usb" address (per-address port). A "vpn" entry on a dead
+// port is always listed: the page must never use it.
 export function startMock(port = 8099) {
-  const st = { streaming: true, paused: false, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [], joins: 0, byes: 0, leaves: 0, restarts: 0, lastHello: null };
+  const st = { streaming: true, paused: false, busy: false, viewer: null, phone: null, tokens: new Set(), fails: 0, lockedUntil: 0, reports: [], log: [], joins: 0, byes: 0, leaves: 0, restarts: 0, lastHello: null,
+    port: 0, usb: null, usbPort: 0, usbListed: false, health: { main: 0, usb: 0 }, viewerVia: null };
   const log = (...a) => { st.log.push(a.join(' ')); if (process.env.MOCK_DEBUG) console.log(...a); };
 
   const toPhone = (o) => st.phone && st.phone.send(o);
+  const addresses = () => [
+    ...(st.usbListed ? [{ ip: '127.0.0.1', kind: 'usb', port: st.usbPort }] : []),
+    { ip: '127.0.0.1', kind: 'wifi' },
+    { ip: '127.0.0.1', kind: 'vpn', port: 9 },
+  ];
+  const announce = () => { if (st.viewer) st.viewer.send({ type: 'addresses', addresses: addresses(), port: st.port }); };
   // Like the app: a paused cast keeps the PeerConnection (the app sends black frames) and says streaming:false.
   const stateMsg = () => ({ type: 'state', streaming: !st.paused, width: 640, height: 360, fps: 60 });
   const deny = (ws, reason, extra = {}) => { ws.send({ type: 'denied', reason, ...extra }); ws.close(); };
@@ -77,10 +87,10 @@ export function startMock(port = 8099) {
     if (!st.streaming) return deny(ws, 'not_streaming');
     if (st.busy) return deny(ws, 'busy');
     if (st.viewer && st.viewer !== ws) { const old = st.viewer; st.viewer = null; old.kill(); }
-    st.viewer = ws; st.joins++; st.lastHello = m.token ? 'token' : 'pin';
+    st.viewer = ws; st.joins++; st.lastHello = m.token ? 'token' : 'pin'; st.viewerVia = ws.via;
     const token = m.token || crypto.randomBytes(16).toString('hex');
     st.tokens.add(token);
-    ws.send({ type: 'welcome', token, viewerId: 'v1', protocol: 1 });
+    ws.send({ type: 'welcome', token, viewerId: 'v1', protocol: 1, addresses: addresses(), port: st.port });
     ws.send(stateMsg());
     toPhone({ cmd: 'newViewer' });
   }
@@ -126,7 +136,7 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
 };
 </script>`;
 
-  const server = http.createServer((req, res) => {
+  const handler = (via) => (req, res) => {
     const u = new URL(req.url, 'http://x');
     const j = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(o)); };
     if (req.method === 'GET' && u.pathname === '/') {
@@ -134,10 +144,24 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       return res.end(fs.readFileSync(VIEWER));
     }
     if (u.pathname === '/phone') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(PHONE_HTML); }
-    if (u.pathname === '/api/info') return j({ name: 'LocalCast', pinRequired: true, streaming: st.streaming, protocol: 1 });
-    if (u.pathname === '/health') { res.writeHead(200); return res.end('ok'); }
+    if (u.pathname === '/api/info') return j({ name: 'LocalCast', pinRequired: true, streaming: st.streaming, protocol: 1, addresses: addresses(), port: st.port });
+    if (u.pathname === '/health') { st.health[via]++; res.writeHead(200); return res.end('ok'); }
     if (u.pathname === '/mock/state') return j({ streaming: st.streaming, viewer: !!st.viewer, phone: !!st.phone, reports: st.reports.length, lastReport: st.reports.at(-1) || null,
-      joins: st.joins, byes: st.byes, leaves: st.leaves, restarts: st.restarts, lastHello: st.lastHello });
+      joins: st.joins, byes: st.byes, leaves: st.leaves, restarts: st.restarts, lastHello: st.lastHello,
+      viewerVia: st.viewer ? st.viewerVia : null, usbPort: st.usbPort, usbUp: !!st.usb, usbListed: st.usbListed, health: st.health });
+    // up=1: start the "usb" listener and list it. up=0: "unplug" — stop it; mode=close closes its sockets (the page sees
+    // the socket close), mode=blackhole leaves its WebSockets open but silent and drops the phone's PeerConnection
+    // (a pulled cable: nothing closes, the media just stops). listed=1 keeps a dead address listed; announce=0 does not
+    // send the `addresses` message to the viewer.
+    if (req.method === 'POST' && u.pathname === '/mock/usb') {
+      const up = u.searchParams.get('up') !== '0';
+      const listed = u.searchParams.has('listed') ? u.searchParams.get('listed') === '1' : up;
+      const tell = u.searchParams.get('announce') !== '0';
+      const done = () => { st.usbListed = listed; if (tell) announce(); j({ ok: true, usbPort: st.usbPort }); };
+      if (up) { if (st.usb) return done(); return startUsb().then(done); }
+      stopUsb(u.searchParams.get('mode') || 'close');
+      return done();
+    }
     if (req.method === 'POST' && u.pathname === '/mock/drop') { if (st.viewer) st.viewer.kill(); return j({ ok: true }); }
     if (req.method === 'POST' && u.pathname === '/mock/stop') {
       st.streaming = false; // tokens survive a stop, like the app (PinGuard is process-wide)
@@ -153,17 +177,19 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       return j({ ok: true });
     }
     if (req.method === 'POST' && u.pathname === '/mock/busy') { st.busy = u.searchParams.get('on') !== '0'; return j({ ok: true }); }
-    if (req.method === 'POST' && u.pathname === '/mock/reset') { if (st.paused) toPhone({ cmd: 'pause', on: false }); st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.paused = false; st.busy = false; st.reports = []; st.joins = 0; st.byes = 0; st.leaves = 0; st.restarts = 0; st.lastHello = null; return j({ ok: true }); }
+    if (req.method === 'POST' && u.pathname === '/mock/reset') { stopUsb('close'); st.usbListed = false; st.health = { main: 0, usb: 0 }; if (st.paused) toPhone({ cmd: 'pause', on: false }); st.fails = 0; st.lockedUntil = 0; st.streaming = true; st.paused = false; st.busy = false; st.reports = []; st.joins = 0; st.byes = 0; st.leaves = 0; st.restarts = 0; st.lastHello = null; return j({ ok: true }); }
     res.writeHead(404); res.end('not found');
-  });
+  };
 
-  server.on('upgrade', (req, socket) => {
+  const onUpgrade = (via, wsSet) => (req, socket) => {
     const u = new URL(req.url, 'http://x');
     const key = req.headers['sec-websocket-key'];
     if (!key || (u.pathname !== '/ws' && u.pathname !== '/phone-ws')) { socket.destroy(); return; }
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' +
       crypto.createHash('sha1').update(key + GUID).digest('base64') + '\r\n\r\n');
     const ws = new Sock(socket);
+    ws.via = via;
+    if (wsSet) { wsSet.add(ws); socket.on('close', () => wsSet.delete(ws)); }
     if (u.pathname === '/phone-ws') {
       st.phone = ws;
       ws.onmessage = (t) => { let m; try { m = JSON.parse(t); } catch { return; } if (st.viewer && (m.type === 'offer' || m.type === 'ice')) st.viewer.send(m); };
@@ -173,10 +199,39 @@ ws.onmessage=async e=>{const m=JSON.parse(e.data);
       ws.onclose = () => { if (st.viewer === ws) { st.viewer = null; st.leaves++; toPhone({ cmd: 'close' }); } };
       setTimeout(() => { if (!ws.hello && !ws.closed) ws.close(); }, 10000);
     }
-  });
+  };
+
+  const server = http.createServer(handler('main'));
+  server.on('upgrade', onUpgrade('main', null));
+
+  let usbMuted = []; // blackholed sockets of earlier "usb" listeners, destroyed on the next change
+  function startUsb() {
+    const wsSet = new Set(), conns = new Set();
+    const srv = http.createServer(handler('usb'));
+    srv.on('connection', (c) => { conns.add(c); c.on('close', () => conns.delete(c)); });
+    srv.on('upgrade', onUpgrade('usb', wsSet));
+    for (const w of usbMuted.splice(0)) w.kill();
+    return new Promise((resolve) => srv.listen(st.usbPort, '127.0.0.1', () => {
+      st.usbPort = srv.address().port; st.usb = { srv, wsSet, conns }; resolve();
+    }));
+  }
+  function stopUsb(mode) {
+    const u = st.usb;
+    if (!u) return;
+    st.usb = null;
+    u.srv.close();
+    for (const ws of u.wsSet) {
+      if (mode === 'blackhole') { ws.muted = true; usbMuted.push(ws); } else ws.kill();
+    }
+    for (const c of u.conns) if (![...u.wsSet].some((w) => w.socket === c)) c.destroy();
+    if (mode === 'blackhole' && st.viewer && st.viewer.via === 'usb') toPhone({ cmd: 'close' });
+    if (mode !== 'blackhole') for (const w of usbMuted.splice(0)) w.kill();
+  }
 
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => {
-    resolve({ port: server.address().port, url: `http://127.0.0.1:${server.address().port}`, state: st, close: () => { server.close(); server.closeAllConnections?.(); } });
+    st.port = server.address().port;
+    resolve({ port: st.port, url: `http://127.0.0.1:${st.port}`, state: st,
+      close: () => { stopUsb('close'); for (const w of usbMuted.splice(0)) w.kill(); server.close(); server.closeAllConnections?.(); } });
   }));
 }
 

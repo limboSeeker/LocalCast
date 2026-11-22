@@ -37,6 +37,7 @@ class SignalingTest {
     private class FakeFactory : ViewerSessionFactory {
         @Volatile override var isStreaming = true
         val created = CopyOnWriteArrayList<FakeSession>()
+        val local = CopyOnWriteArrayList<String?>()
         override fun createViewer(
             viewerId: String,
             remoteAddress: String,
@@ -45,6 +46,7 @@ class SignalingTest {
         ): ViewerSession? {
             val s = FakeSession(viewerId, send)
             created += s
+            local += localAddress
             send(ServerMessage.Offer("offer-$viewerId"))
             return s
         }
@@ -61,16 +63,21 @@ class SignalingTest {
     private fun run(
         factory: FakeFactory = FakeFactory(),
         max: Int? = 3,
+        addresses: (() -> Pair<List<AddressDto>, Int?>)? = null,
         block: suspend (io.ktor.client.HttpClient, Signaling, PinGuard, FakeFactory, Events) -> Unit,
     ) {
         val guard = PinGuard()
         val events = Events()
-        val signaling = if (max == null) Signaling(guard, factory, { true }, events) else Signaling(guard, factory, { true }, events, max)
+        val signaling = when {
+            addresses != null -> Signaling(guard, factory, { true }, events, max ?: Int.MAX_VALUE, addresses)
+            max == null -> Signaling(guard, factory, { true }, events)
+            else -> Signaling(guard, factory, { true }, events, max)
+        }
         runBlocking {
             testApplication {
                 application {
                     install(WebSockets)
-                    routing { webSocket("/ws") { signaling.handle(this, "1.2.3.4") } }
+                    routing { webSocket("/ws") { signaling.handle(this, "1.2.3.4", "192.168.42.129") } }
                 }
                 val client = createClient { install(ClientWebSockets) }
                 block(client, signaling, guard, factory, events)
@@ -189,6 +196,56 @@ class SignalingTest {
         }
         waitFor { signaling.viewerCount == 0 }
         assertTrue(factory.created.all { it.closed })
+    }
+
+    @Test fun localAddressReachesTheEngine() = run { client, _, guard, factory, _ ->
+        client.webSocket("/ws") {
+            sendC(ClientMessage.Hello(pin = guard.pin))
+            recv(); recv()
+            assertEquals("192.168.42.129", factory.local.single())
+        }
+    }
+
+    @Test fun welcomeWithoutAddressProviderIsBackwardCompatible() = run { client, _, guard, _, _ ->
+        client.webSocket("/ws") {
+            sendC(ClientMessage.Hello(pin = guard.pin))
+            val w = recv() as ServerMessage.Welcome
+            assertEquals(emptyList<AddressDto>(), w.addresses)
+            assertEquals(null, w.port)
+        }
+    }
+
+    @Test fun welcomeCarriesAddressesAndBroadcastReachesViewers() {
+        val list = java.util.concurrent.atomic.AtomicReference(listOf(AddressDto("192.168.1.5", "wifi")))
+        run(addresses = { list.get() to 8080 }) { client, signaling, guard, _, _ ->
+            client.webSocket("/ws") {
+                sendC(ClientMessage.Hello(pin = guard.pin))
+                val w = recv() as ServerMessage.Welcome
+                assertEquals(listOf(AddressDto("192.168.1.5", "wifi")), w.addresses)
+                assertEquals(8080, w.port)
+                recv() // offer
+                val first = this
+                client.webSocket("/ws") {
+                    sendC(ClientMessage.Hello(pin = guard.pin))
+                    recv(); recv()
+                    list.set(listOf(AddressDto("192.168.42.129", "usb"), AddressDto("192.168.1.5", "wifi")))
+                    signaling.broadcastAddresses()
+                    val expected = ServerMessage.Addresses(list.get(), 8080)
+                    assertEquals(expected, recv())
+                    assertEquals(expected, first.recv())
+                }
+            }
+        }
+    }
+
+    @Test fun broadcastAddressesWithoutPortIsSkipped() = run { client, signaling, guard, _, _ ->
+        client.webSocket("/ws") {
+            sendC(ClientMessage.Hello(pin = guard.pin))
+            recv(); recv()
+            signaling.broadcastAddresses() // default provider: no port -> nothing sent
+            signaling.broadcast(ServerMessage.State(true, 1, 2, 3))
+            assertEquals(ServerMessage.State(true, 1, 2, 3), recv())
+        }
     }
 
     @Test fun disconnectAllSendsBye() = run { client, signaling, guard, _, _ ->

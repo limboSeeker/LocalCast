@@ -1,5 +1,7 @@
 package com.localcast.app.server
 
+import com.localcast.app.service.NetAddress
+import java.util.Locale
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -68,6 +70,18 @@ sealed interface ServerMessage {
         val token: String,
         val viewerId: String,
         val protocol: Int = Protocol.VERSION,
+        /** This device's own addresses, for the viewer's multipath (switch to the cable, fall back to Wi-Fi). */
+        val addresses: List<AddressDto> = emptyList(),
+        /** Port the server listens on (all addresses); null = unknown, the viewer keeps its page's port. */
+        val port: Int? = null,
+    ) : ServerMessage
+
+    /** The device's address set changed (cable plugged / unplugged, Wi-Fi joined or lost). */
+    @Serializable
+    @SerialName("addresses")
+    data class Addresses(
+        val addresses: List<AddressDto>,
+        val port: Int,
     ) : ServerMessage
 
     @Serializable
@@ -170,4 +184,23 @@ data class ServerInfo(
     val pinRequired: Boolean,
     val streaming: Boolean,
     val protocol: Int = Protocol.VERSION,
+    val addresses: List<AddressDto> = emptyList(),
+    val port: Int? = null,
 )
+
+/**
+ * One address of this device as the viewer sees it. [kind]: `usb`, `ethernet`, `wifi`, `hotspot`, `vpn`, `other`
+ * (the viewer prefers usb > ethernet > wifi/hotspot > other and never uses vpn). [port] overrides the message's port
+ * for this address (null = the server port; the app listens on all addresses with one port).
+ */
+@Serializable
+data class AddressDto(
+    val ip: String,
+    val kind: String,
+    val port: Int? = null,
+)
+
+/** [NetAddress] (from [NetAddresses.current]) → wire form; kind is the lowercase AddressKind name. */
+fun NetAddress.toDto(): AddressDto = AddressDto(ip, kind.name.lowercase(Locale.ROOT))
+
+fun List<NetAddress>.toDtos(): List<AddressDto> = map { it.toDto() }

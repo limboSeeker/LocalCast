@@ -1,5 +1,7 @@
 package com.localcast.app.server
 
+import com.localcast.app.service.AddressKind
+import com.localcast.app.service.NetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +34,8 @@ class ProtocolTest {
             ServerMessage.Ice(ice),
             ServerMessage.State(true, 1080, 2400, 60),
             ServerMessage.Bye("stopped"),
+            ServerMessage.Welcome("t", "v1", addresses = listOf(AddressDto("192.168.42.129", "usb")), port = 8080),
+            ServerMessage.Addresses(listOf(AddressDto("192.168.1.5", "wifi"), AddressDto("10.0.0.2", "other", 8081)), 8080),
         )
         for (m in msgs) {
             val text = Protocol.encodeServer(m)
@@ -46,6 +50,34 @@ class ProtocolTest {
         assertTrue(denied, !denied.contains("retryAfterSec"))
         assertTrue(Protocol.encodeServer(ServerMessage.Denied(DenyReason.LOCKED, 60)).contains("\"retryAfterSec\":60"))
         assertEquals("{\"type\":\"bye\"}", Protocol.json.encodeToString(ClientMessage.serializer(), ClientMessage.Bye))
+    }
+
+    @Test fun addressesWireForm() {
+        assertEquals(
+            """{"type":"addresses","addresses":[{"ip":"192.168.42.129","kind":"usb"}],"port":8080}""",
+            Protocol.encodeServer(ServerMessage.Addresses(listOf(AddressDto("192.168.42.129", "usb")), 8080)),
+        )
+        // Old clients/servers: the new fields have defaults on both sides.
+        val w = Protocol.json.decodeFromString(ServerMessage.serializer(), """{"type":"welcome","token":"t","viewerId":"v1"}""")
+        assertEquals(ServerMessage.Welcome("t", "v1"), w)
+        val info = Protocol.json.decodeFromString(ServerInfo.serializer(), """{"name":"n","pinRequired":true,"streaming":false}""")
+        assertEquals(emptyList<AddressDto>(), info.addresses)
+        assertEquals(null, info.port)
+        val withAddr = Protocol.json.encodeToString(ServerInfo.serializer(), info.copy(addresses = listOf(AddressDto("1.2.3.4", "wifi")), port = 8080))
+        assertTrue(withAddr, withAddr.contains("\"addresses\":[{\"ip\":\"1.2.3.4\",\"kind\":\"wifi\"}],\"port\":8080"))
+    }
+
+    @Test fun netAddressToDto() {
+        val list = listOf(
+            NetAddress("192.168.42.129", "rndis0", AddressKind.USB),
+            NetAddress("192.168.1.5", "wlan0", AddressKind.WIFI),
+            NetAddress("192.168.43.1", "swlan0", AddressKind.HOTSPOT),
+            NetAddress("10.0.0.5", "eth0", AddressKind.ETHERNET),
+            NetAddress("10.8.0.2", "tun0", AddressKind.VPN),
+            NetAddress("192.168.49.1", "p2p0", AddressKind.OTHER),
+        ).toDtos()
+        assertEquals(listOf("usb", "wifi", "hotspot", "ethernet", "vpn", "other"), list.map { it.kind })
+        assertEquals(AddressDto("192.168.42.129", "usb"), list[0])
     }
 
     @Test fun unknownFieldsIgnored() {
