@@ -44,6 +44,7 @@ object HealthPolicy {
             worstLatencyMs = worstLatency,
             thermalLevel = load.thermalLevel,
             hardwareEncoders = load.hardwareEncoders,
+            wifiMhz = load.wifiMhz,
         )
     }
 }

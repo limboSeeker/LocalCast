@@ -102,6 +102,7 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
 
     /** Assumed capacity of the Wi-Fi link for all viewers together (last [rebalance]). */
     private var linkBps = 0
+    private var wifiMhz: Int? = null
 
     /** Devices (by address) turned away because the device was at capacity, and when. */
     private val turnedAwayAt = HashMap<String, Long>()
@@ -375,7 +376,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
     /** Re-splits the Wi-Fi between the viewers and applies the caps to every sender. */
     private fun rebalance() {
         val lite = peers.values.count { it.softwareEncoder }
-        val link = LoadPolicy.linkBudgetBps(WifiBand.currentMhz(appContext))
+        wifiMhz = WifiBand.currentMhz(appContext)
+        val link = LoadPolicy.linkBudgetBps(wifiMhz)
         linkBps = link
         val next = LoadPolicy.shares(sendProfile.maxBitrateBps, link, peers.size - lite, lite)
         if (next != shares) {
@@ -464,7 +466,8 @@ class RtcEngine(context: Context, private val listener: Listener) : ViewerSessio
                 hardwareEncoders = TunedVideoEncoderFactory.getLiveHardwareEncoders(),
                 thermalLevel = thermal?.level?.ordinal ?: 0,
                 summary = loadLine() + " link=${linkBps / 1000}kbps cap=${shares.fullBps / 1000}kbps" +
-                    " capture=$currentSize@$currentFps",
+                    " capture=$currentSize@$currentFps wifi=${wifiMhz ?: "-"}MHz",
+                wifiMhz = wifiMhz,
             ),
         )
     }

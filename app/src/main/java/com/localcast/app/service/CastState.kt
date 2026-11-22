@@ -50,6 +50,8 @@ data class LoadInfo(
     val thermalLevel: Int,
     /** One-line technical summary for "Copy diagnostics". */
     val summary: String,
+    /** Frequency (MHz) of the device's Wi-Fi client link, or null: hotspot only, Ethernet or unknown. */
+    val wifiMhz: Int? = null,
 )
 
 enum class HealthLevel { OK, WARN, PROBLEM }
@@ -83,6 +85,8 @@ data class BroadcastHealth(
     val worstLatencyMs: Int?,
     val thermalLevel: Int,
     val hardwareEncoders: Int,
+    /** See [LoadInfo.wifiMhz]. */
+    val wifiMhz: Int? = null,
 )
 
 /** Aggregated outbound stats of one viewer's PeerConnection (from getStats). */
