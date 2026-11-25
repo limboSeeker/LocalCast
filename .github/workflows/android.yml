@@ -40,7 +40,7 @@ jobs:
           "$SDKMANAGER" --install "platforms;android-37.2" "build-tools;36.0.0"
 
       # Tag builds only. Secrets go through env, never inline in the script, so they are not echoed;
-      # GitHub also masks them in the log. The keystore path is not secret.
+      # GitHub also masks them in the log.
       - name: Decode release keystore
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -51,12 +51,13 @@ jobs:
             exit 1
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "LOCALCAST_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
       # Branches and PRs: release is signed with the debug key (see app/build.gradle.kts); AGP
       # creates it on the runner. Tags: the release key is required, a missing one fails the build.
+      # The LOCALCAST_* variables are set only for this step: Gradle treats a partial set as an error.
       - name: Build and test
         env:
+          LOCALCAST_KEYSTORE_PATH: ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/release.jks', runner.temp) || '' }}
           LOCALCAST_KEYSTORE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEYSTORE_PASSWORD || '' }}
           LOCALCAST_KEY_ALIAS: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEY_ALIAS || '' }}
           LOCALCAST_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEY_PASSWORD || '' }}
@@ -72,7 +73,11 @@ jobs:
       - name: Prepare release files
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          VERSION=$(./gradlew -q :app:printVersionName)
+          VERSION=$(./gradlew -q :app:printVersionName | tail -n 1)
+          if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([-+.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Unexpected versionName from Gradle: '$VERSION'"
+            exit 1
+          fi
           if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match versionName $VERSION in app/build.gradle.kts"
             exit 1

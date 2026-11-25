@@ -22,10 +22,11 @@ val releaseKey: ReleaseKey? = run {
         if (missing.isNotEmpty()) {
             throw GradleException("LocalCast: release signing in $source is incomplete, missing: ${missing.joinToString()}")
         }
-        val (path, storePassword, alias, keyPassword) = values.values.map { it!!.trim() }
-        val store = rootProject.file(path)
+        // Passwords are used verbatim: a leading or trailing space may be part of them.
+        val (path, storePassword, alias, keyPassword) = values.values.map { it!! }
+        val store = rootProject.file(path.trim())
         if (!store.isFile) throw GradleException("LocalCast: release keystore not found: $store ($source)")
-        return ReleaseKey(store, storePassword, alias, keyPassword)
+        return ReleaseKey(store, storePassword, alias.trim(), keyPassword)
     }
     val env = listOf(
         "LOCALCAST_KEYSTORE_PATH", "LOCALCAST_KEYSTORE_PASSWORD", "LOCALCAST_KEY_ALIAS", "LOCALCAST_KEY_PASSWORD",
