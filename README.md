@@ -1,8 +1,29 @@
 # LocalCast
 
-[Українська](README.uk.md)
-
 Cast the screen of an Android phone or tablet to any device with a browser, over local Wi-Fi or the phone's hotspot. No internet and no cloud servers.
+
+[![License: Apache-2.0](https://img.shields.io/github/license/limboSeeker/LocalCast)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/limboSeeker/LocalCast)](https://github.com/limboSeeker/LocalCast/releases/latest)
+[![Android CI](https://img.shields.io/github/actions/workflow/status/limboSeeker/LocalCast/android.yml?branch=main&label=build)](https://github.com/limboSeeker/LocalCast/actions/workflows/android.yml)
+
+<!-- Uncomment when docs/images/demo.gif is added
+<p align="center"><img src="docs/images/demo.gif" width="800" alt="LocalCast demo: phone next to a laptop, the same picture with no visible delay"></p>
+-->
+
+<!-- Uncomment when docs/images/app-main.png and app-settings.png are added
+<p align="center">
+  <img src="docs/images/app-main.png" width="270" alt="LocalCast main screen while casting: QR code and PIN">
+  <img src="docs/images/app-settings.png" width="270" alt="LocalCast settings">
+</p>
+-->
+
+<p align="center">
+  <img src="docs/images/viewer-pin.png" width="400" alt="Viewer page: PIN entry">
+  <img src="docs/images/viewer-stream.png" width="400" alt="Viewer page while casting, with the stats overlay (mock test pattern)">
+  <img src="docs/images/viewer-mobile.png" width="147" alt="Viewer page on a phone (iPhone 14 viewport)">
+</p>
+
+[Українська](README.uk.md)
 
 - **Android 11+**: Samsung, Xiaomi, Google Pixel, OnePlus, MediaTek devices and others.
 - **Viewing**: Chrome, Safari (iOS/macOS), Samsung Internet, Firefox, Edge. Nothing to install.

@@ -1,8 +1,29 @@
 # LocalCast
 
-[English](README.md)
-
 Трансляція екрана Android-смартфона або планшета на будь-який пристрій із браузером у локальній мережі Wi-Fi або через точку доступу телефона. Без інтернету й без хмарних серверів.
+
+[![License: Apache-2.0](https://img.shields.io/github/license/limboSeeker/LocalCast)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/limboSeeker/LocalCast)](https://github.com/limboSeeker/LocalCast/releases/latest)
+[![Android CI](https://img.shields.io/github/actions/workflow/status/limboSeeker/LocalCast/android.yml?branch=main&label=build)](https://github.com/limboSeeker/LocalCast/actions/workflows/android.yml)
+
+<!-- Розкоментувати, коли з'явиться docs/images/demo.gif
+<p align="center"><img src="docs/images/demo.gif" width="800" alt="Демо LocalCast: телефон поруч із ноутбуком, та сама картинка без помітної затримки"></p>
+-->
+
+<!-- Розкоментувати, коли з'являться docs/images/app-main.png і app-settings.png
+<p align="center">
+  <img src="docs/images/app-main.png" width="270" alt="Головний екран LocalCast під час трансляції: QR-код і PIN">
+  <img src="docs/images/app-settings.png" width="270" alt="Налаштування LocalCast">
+</p>
+-->
+
+<p align="center">
+  <img src="docs/images/viewer-pin.png" width="400" alt="Сторінка перегляду: введення PIN">
+  <img src="docs/images/viewer-stream.png" width="400" alt="Сторінка перегляду під час трансляції, зі статистикою (тестова картинка mock-сервера)">
+  <img src="docs/images/viewer-mobile.png" width="147" alt="Сторінка перегляду на телефоні (viewport iPhone 14)">
+</p>
+
+[English](README.md)
 
 - **Android 11+**: Samsung, Xiaomi, Google Pixel, OnePlus, MediaTek-пристрої та інші.
 - **Перегляд**: Chrome, Safari (iOS/macOS), Samsung Internet, Firefox, Edge. Нічого встановлювати не треба.
