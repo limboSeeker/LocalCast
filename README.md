@@ -38,7 +38,9 @@ Cast the screen of an Android phone or tablet to any device with a browser, over
 - **Languages**: English and Ukrainian. The app follows the system language; on Android 13+ the app language can be changed in system settings (in the app: Settings → Мова / Language). The viewer page follows the browser language; `?lang=en` or `?lang=uk` in the address picks one explicitly.
 
 ## Download
-The APK is on the [Releases](https://github.com/limboSeeker/LocalCast/releases/latest) page: `LocalCast-<version>-arm64.apk` for almost all phones and tablets, `-armv7.apk` only for old 32-bit devices. Allow "Install unknown apps" when asked. Test builds are signed with a debug key.
+The APK is on the [Releases](https://github.com/limboSeeker/LocalCast/releases/latest) page: `LocalCast-<version>-arm64.apk` for almost all phones and tablets, `-armv7.apk` only for old 32-bit devices. Allow "Install unknown apps" when asked. The APKs are signed with the developer's key; every release has their SHA-256 checksums in `SHA256SUMS.txt`.
+
+> If you installed an earlier debug-signed build, uninstall it first — Android won't update an app signed with a different key.
 
 ## How to use
 1. Put the phone and the viewing device on the same Wi-Fi network. Or turn on the hotspot on the phone and connect the other device to it.
@@ -83,16 +85,17 @@ The build produces one APK per architecture (no universal APK):
 | `app-armeabi-v7a-release.apk` | older 32-bit devices | ~7.1 MB |
 | `app-x86_64-release.apk` | x86_64 emulator | ~9.9 MB |
 
-Release is built with R8 and signed with the debug key for testing. Debug APKs (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) are built without R8, ~45 MB.
+Release is built with R8. It is signed with the release key when one is configured (`keystore.properties` or `LOCALCAST_*` environment variables, see [docs/RELEASING.md](docs/RELEASING.md)), otherwise with the debug key for testing. Debug APKs (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) are built without R8, ~45 MB.
 
 Native libraries (`.so`) are stored compressed in the APK and extracted at install time. In 64-bit APKs their ELF segments are aligned to 16 KB (Android 15+).
 
 UI strings: English in `app/src/main/res/values/` (default), Ukrainian in `values-uk/`. Lint fails the build if a string is missing in either language (`MissingTranslation`, `ExtraTranslation`). The viewer page keeps both languages in one dictionary in `app/src/main/assets/viewer/index.html`.
 
 ### CI
-GitHub Actions (`.github/workflows/android.yml`) runs on push to `main` and on every pull request:
+GitHub Actions (`.github/workflows/android.yml`) runs on push to `main`, on every pull request and on `v*` tags:
 - `build`: `./gradlew testDebugUnitTest lintDebug assembleRelease`; artifacts are the arm64-v8a and armeabi-v7a release APKs and the lint report;
-- `viewer-e2e`: viewer page tests from `tools/e2e` (mock server + Playwright Chromium).
+- `viewer-e2e`: viewer page tests from `tools/e2e` (mock server + Playwright Chromium);
+- `release` (tags only): the APKs are signed with the release key from the repository secrets, renamed to `LocalCast-<version>-<abi>.apk` and published with `SHA256SUMS.txt` as a GitHub Release. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Tests
 - **Unit tests** (`./gradlew testDebugUnitTest`): PIN and lockout, protocol, signaling (Ktor test host), network address selection, size/FPS/bitrate calculation, viewer admission and Wi-Fi split, broadcast health.

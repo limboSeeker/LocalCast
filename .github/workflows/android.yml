@@ -3,6 +3,8 @@ name: Android
 on:
   push:
     branches: [main]
+    # A version tag builds APKs signed with the release key and publishes a GitHub Release.
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -37,9 +39,66 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" --install "platforms;android-37.2" "build-tools;36.0.0"
 
-      # Release is signed with the debug key (see app/build.gradle.kts); AGP creates it on the runner.
+      # Tag builds only. Secrets go through env, never inline in the script, so they are not echoed;
+      # GitHub also masks them in the log. The keystore path is not secret.
+      - name: Decode release keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LOCALCAST_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret LOCALCAST_KEYSTORE_BASE64 is not set (see docs/RELEASING.md)"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "LOCALCAST_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      # Branches and PRs: release is signed with the debug key (see app/build.gradle.kts); AGP
+      # creates it on the runner. Tags: the release key is required, a missing one fails the build.
       - name: Build and test
-        run: ./gradlew testDebugUnitTest lintDebug assembleRelease
+        env:
+          LOCALCAST_KEYSTORE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEYSTORE_PASSWORD || '' }}
+          LOCALCAST_KEY_ALIAS: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEY_ALIAS || '' }}
+          LOCALCAST_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.LOCALCAST_KEY_PASSWORD || '' }}
+          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: ./gradlew testDebugUnitTest lintDebug assembleRelease -Plocalcast.requireReleaseSigning=$REQUIRE_SIGNING
+
+      - name: Remove release keystore
+        if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # LocalCast-<versionName>-<abi>.apk + SHA256SUMS.txt. The version comes from Gradle and must
+      # match the tag, so a forgotten version bump does not ship as the wrong release.
+      - name: Prepare release files
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(./gradlew -q :app:printVersionName)
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match versionName $VERSION in app/build.gradle.kts"
+            exit 1
+          fi
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          mkdir -p release
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk "release/LocalCast-$VERSION-arm64.apk"
+          cp app/build/outputs/apk/release/app-armeabi-v7a-release.apk "release/LocalCast-$VERSION-armv7.apk"
+          for apk in release/*.apk; do
+            CERTS=$("$APKSIGNER" verify --print-certs "$apk")
+            if grep -q "CN=Android Debug" <<< "$CERTS"; then
+              echo "::error::$apk is signed with the debug key"
+              exit 1
+            fi
+            grep "certificate SHA-256 digest" <<< "$CERTS"
+          done
+          (cd release && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Upload signed release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: localcast-signed-release
+          path: release/
+          if-no-files-found: error
 
       - name: Upload release APKs
         uses: actions/upload-artifact@v7
@@ -93,3 +152,25 @@ jobs:
           name: viewer-e2e-screenshots
           path: tools/e2e/out/
           if-no-files-found: ignore
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, viewer-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: localcast-signed-release
+          path: release
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/*.apk release/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "LocalCast ${GITHUB_REF_NAME#v}"
