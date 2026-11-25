@@ -86,3 +86,6 @@ GitHub Actions (`.github/workflows/android.yml`) runs on push to `main` and on e
 - **Control.** No remote control. The phone is operated only by hand.
 - **Viewer screen.** A page served over `http://` can't use `wakeLock` (HTTPS only). The playing video keeps the display awake instead (checked in Chrome and Safari on macOS); other browsers and power settings may differ.
 - **Latency.** Real latency depends on Wi-Fi: best is 5 GHz or the phone's own hotspot. Chrome shows measured latency when it provides the frame capture time. Otherwise the overlay shows an estimate summed from the parts of the pipeline.
+
+## License
+Apache License 2.0, see [LICENSE](LICENSE).
