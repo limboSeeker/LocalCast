@@ -1,8 +1,29 @@
 # LocalCast
 
-[English](README.md)
-
 Трансляція екрана Android-смартфона або планшета на будь-який пристрій із браузером у локальній мережі Wi-Fi або через точку доступу телефона. Без інтернету й без хмарних серверів.
+
+[![License: Apache-2.0](https://img.shields.io/github/license/limboSeeker/LocalCast)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/limboSeeker/LocalCast)](https://github.com/limboSeeker/LocalCast/releases/latest)
+[![Android CI](https://img.shields.io/github/actions/workflow/status/limboSeeker/LocalCast/android.yml?branch=main&label=build)](https://github.com/limboSeeker/LocalCast/actions/workflows/android.yml)
+
+<!-- Розкоментувати, коли з'явиться docs/images/demo.gif
+<p align="center"><img src="docs/images/demo.gif" width="800" alt="Демо LocalCast: телефон поруч із ноутбуком, та сама картинка без помітної затримки"></p>
+-->
+
+<!-- Розкоментувати, коли з'являться docs/images/app-main.png і app-settings.png
+<p align="center">
+  <img src="docs/images/app-main.png" width="270" alt="Головний екран LocalCast під час трансляції: QR-код і PIN">
+  <img src="docs/images/app-settings.png" width="270" alt="Налаштування LocalCast">
+</p>
+-->
+
+<p align="center">
+  <img src="docs/images/viewer-pin.png" width="400" alt="Сторінка перегляду: введення PIN">
+  <img src="docs/images/viewer-stream.png" width="400" alt="Сторінка перегляду під час трансляції, зі статистикою (тестова картинка mock-сервера)">
+  <img src="docs/images/viewer-mobile.png" width="147" alt="Сторінка перегляду на телефоні (viewport iPhone 14)">
+</p>
+
+[English](README.md)
 
 - **Android 11+**: Samsung, Xiaomi, Google Pixel, OnePlus, MediaTek-пристрої та інші.
 - **Перегляд**: Chrome, Safari (iOS/macOS), Samsung Internet, Firefox, Edge. Нічого встановлювати не треба.
@@ -17,7 +38,9 @@
 - **Мови**: англійська й українська. Застосунок бере мову системи; на Android 13+ мову застосунку можна змінити в налаштуваннях системи (у застосунку: Налаштування → Мова / Language). Сторінка перегляду бере мову браузера; `?lang=uk` або `?lang=en` в адресі задає її явно.
 
 ## Завантаження
-APK — на сторінці [Releases](https://github.com/limboSeeker/LocalCast/releases/latest): `LocalCast-<версія>-arm64.apk` для майже всіх телефонів і планшетів, `-armv7.apk` лише для старих 32-бітних пристроїв. Коли система спитає, дозвольте «Встановлення невідомих застосунків». Тестові збірки підписані debug-ключем.
+APK — на сторінці [Releases](https://github.com/limboSeeker/LocalCast/releases/latest): `LocalCast-<версія>-arm64.apk` для майже всіх телефонів і планшетів, `-armv7.apk` лише для старих 32-бітних пристроїв. Коли система спитає, дозвольте «Встановлення невідомих застосунків». APK підписані ключем розробника; контрольні суми SHA-256 лежать у `SHA256SUMS.txt` у кожному релізі.
+
+> Якщо у вас встановлена попередня збірка, підписана debug-ключем, спершу видаліть її — Android не оновлює застосунок, підписаний іншим ключем.
 
 ## Як користуватися
 1. Телефон і пристрій для перегляду мають бути в одній мережі Wi-Fi. Інший варіант: увімкнути точку доступу на телефоні й під'єднати до неї другий пристрій.
@@ -62,16 +85,17 @@ APK — на сторінці [Releases](https://github.com/limboSeeker/LocalCas
 | `app-armeabi-v7a-release.apk` | старі 32-бітні пристрої | ~7,1 МБ |
 | `app-x86_64-release.apk` | емулятор x86_64 | ~9,9 МБ |
 
-Release зібраний R8 і для перевірки підписаний debug-ключем. Debug APK (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) — без R8, ~45 МБ.
+Release збирається з R8. Він підписується release-ключем, якщо той налаштований (`keystore.properties` або змінні середовища `LOCALCAST_*`, див. [docs/RELEASING.md](docs/RELEASING.md)), інакше — debug-ключем для перевірки. Debug APK (`app/build/outputs/apk/debug/app-<abi>-debug.apk`) — без R8, ~45 МБ.
 
 Нативні бібліотеки (`.so`) лежать в APK стиснутими й розпаковуються під час встановлення. У 64-бітних APK їхні ELF-сегменти вирівняні на 16 KB (Android 15+).
 
 Тексти інтерфейсу: англійські в `app/src/main/res/values/` (за замовчуванням), українські — у `values-uk/`. Lint зупиняє збирання, якщо рядка бракує в одній із мов (`MissingTranslation`, `ExtraTranslation`). Сторінка перегляду тримає обидві мови в одному словнику в `app/src/main/assets/viewer/index.html`.
 
 ### CI
-GitHub Actions (`.github/workflows/android.yml`) на push у `main` і на кожен pull request:
+GitHub Actions (`.github/workflows/android.yml`) на push у `main`, на кожен pull request і на теги `v*`:
 - `build`: `./gradlew testDebugUnitTest lintDebug assembleRelease`; артефакти — release APK arm64-v8a і armeabi-v7a та звіт lint;
-- `viewer-e2e`: тести сторінки перегляду з `tools/e2e` (мок-сервер + Playwright Chromium).
+- `viewer-e2e`: тести сторінки перегляду з `tools/e2e` (мок-сервер + Playwright Chromium);
+- `release` (лише теги): APK підписуються release-ключем із секретів репозиторію, перейменовуються в `LocalCast-<версія>-<abi>.apk` і публікуються разом із `SHA256SUMS.txt` як GitHub Release. Див. [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Тести
 - **Юніт-тести** (`./gradlew testDebugUnitTest`): PIN і блокування, протокол, сигналізація (Ktor test host), вибір мережевих адрес, розрахунок розміру/FPS/бітрейту, допуск глядачів і поділ Wi-Fi, стан трансляції.
@@ -86,3 +110,6 @@ GitHub Actions (`.github/workflows/android.yml`) на push у `main` і на к�
 - **Керування.** Віддаленого керування немає. Телефоном керують лише фізично.
 - **Екран глядача.** Сторінка на `http://` не може використати `wakeLock` (лише HTTPS). Натомість екран не дає згаснути саме відео, що грає (перевірено в Chrome і Safari на macOS); інші браузери й налаштування живлення можуть поводитися інакше.
 - **Затримка.** Реальна затримка залежить від Wi-Fi: найкраще — 5 ГГц або точка доступу самого телефона. Chrome показує виміряну затримку, якщо дає час захоплення кадру. Інакше в оверлеї показується оцінка зі складових.
+
+## Ліцензія
+Apache License 2.0, див. [LICENSE](LICENSE).

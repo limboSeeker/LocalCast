@@ -11,3 +11,8 @@ captures/
 /tools/e2e/node_modules/
 /tools/e2e/out/
 /dist/
+
+# Release signing (see docs/RELEASING.md): never commit keys or their passwords.
+keystore.properties
+*.jks
+*.keystore

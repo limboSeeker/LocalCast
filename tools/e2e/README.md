@@ -5,6 +5,7 @@ The phone mock (`mock-server.mjs`) serves `app/src/main/assets/viewer/index.html
 
 - Once: `cd tools/e2e && npm ci && npx playwright install chromium webkit`
 - Automated: `node --test viewer.spec.mjs` or `npm test` (Chromium; screenshots in `out/`)
+- README screenshots: `npm run screenshots` writes `docs/images/viewer-{pin,stream,mobile}.png` (1280×800 and iPhone 14; the stream is the mock test pattern; PNGs are palette-compressed with ffmpeg if it is on PATH)
 - Safari engine: `BROWSER=webkit node --test viewer.spec.mjs` or `npm run test:webkit` — the viewer runs in Playwright WebKit,
   the mock phone stays in Chromium (like the phone's libwebrtc); screenshots get a `-webkit` suffix
 - Manual: `node mock-server.mjs 8099`, open `http://127.0.0.1:8099/phone`, then `http://127.0.0.1:8099/#pin=123456` (add `?lang=en` or `?lang=uk` before `#` to force a language)

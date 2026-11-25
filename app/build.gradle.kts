@@ -1,7 +1,56 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+}
+
+// Release signing key, in this order:
+//  1. LOCALCAST_KEYSTORE_PATH, LOCALCAST_KEYSTORE_PASSWORD, LOCALCAST_KEY_ALIAS, LOCALCAST_KEY_PASSWORD
+//     environment variables (CI, see docs/RELEASING.md);
+//  2. keystore.properties in the project root (storeFile, storePassword, keyAlias, keyPassword;
+//     see keystore.properties.example). Git-ignored, like *.jks and *.keystore.
+// Neither: release is signed with the debug key so it can still be installed for testing, and
+// release builds print a warning. -Plocalcast.requireReleaseSigning=true (tag builds on CI) turns
+// that into an error. A half-filled source is always an error. Passwords are never logged.
+class ReleaseKey(val storeFile: File, val storePassword: String, val keyAlias: String, val keyPassword: String)
+
+val releaseKey: ReleaseKey? = run {
+    fun key(source: String, values: Map<String, String?>): ReleaseKey {
+        val missing = values.filterValues { it.isNullOrBlank() }.keys
+        if (missing.isNotEmpty()) {
+            throw GradleException("LocalCast: release signing in $source is incomplete, missing: ${missing.joinToString()}")
+        }
+        // Passwords are used verbatim: a leading or trailing space may be part of them.
+        val (path, storePassword, alias, keyPassword) = values.values.map { it!! }
+        val store = rootProject.file(path.trim())
+        if (!store.isFile) throw GradleException("LocalCast: release keystore not found: $store ($source)")
+        return ReleaseKey(store, storePassword, alias.trim(), keyPassword)
+    }
+    val env = listOf(
+        "LOCALCAST_KEYSTORE_PATH", "LOCALCAST_KEYSTORE_PASSWORD", "LOCALCAST_KEY_ALIAS", "LOCALCAST_KEY_PASSWORD",
+    ).associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotBlank) }
+    val propsText = providers.fileContents(rootProject.layout.projectDirectory.file("keystore.properties")).asText.orNull
+    when {
+        env.values.any { it != null } -> key("environment variables", env)
+        propsText != null -> {
+            val props = Properties().apply { load(propsText.reader()) }
+            key("keystore.properties", listOf("storeFile", "storePassword", "keyAlias", "keyPassword").associateWith { props.getProperty(it) })
+        }
+        else -> null
+    }
+}
+
+if (releaseKey == null) {
+    if (providers.gradleProperty("localcast.requireReleaseSigning").orNull == "true") {
+        throw GradleException("LocalCast: release signing key not configured (required by -Plocalcast.requireReleaseSigning)")
+    }
+    val buildsRelease = gradle.startParameter.taskNames.any {
+        val task = it.substringAfterLast(':')
+        task.contains("Release") || task in setOf("assemble", "build", "bundle")
+    }
+    if (buildsRelease) logger.warn("LocalCast: release signing key not configured, APK is NOT signed for distribution")
 }
 
 android {
@@ -23,6 +72,17 @@ android {
         localeFilters += listOf("en", "uk")
     }
 
+    signingConfigs {
+        if (releaseKey != null) {
+            create("release") {
+                storeFile = releaseKey.storeFile
+                storePassword = releaseKey.storePassword
+                keyAlias = releaseKey.keyAlias
+                keyPassword = releaseKey.keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -31,8 +91,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Signed with the debug key so the release build can be installed for testing.
-            signingConfig = signingConfigs.getByName("debug")
+            // The developer key when configured (see the top of this file), else the debug key.
+            signingConfig = signingConfigs.getByName(if (releaseKey != null) "release" else "debug")
         }
     }
 
@@ -119,6 +179,12 @@ dependencies {
     // Same exclusions in tests, so SignalingTest runs Ktor exactly as the app ships it.
     testImplementation(libs.ktor.server.test.host) { withoutReflectAndHocon() }
     testImplementation(libs.ktor.client.websockets)
+}
+
+// For CI: the version is read from here, not duplicated in the workflow.
+tasks.register("printVersionName") {
+    val versionName = android.defaultConfig.versionName
+    doLast { println(versionName) }
 }
 
 // ktor-server-core depends on kotlin-reflect (~835 KB of dex) and Typesafe Config (~67 KB).
